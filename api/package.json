@@ -1,0 +1,16 @@
+{
+	"name": "ai-trader-api",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"cf-typegen": "wrangler types"
+	},
+	"dependencies": {
+		"dayjs": "^1.11.13",
+		"hono": "^4.6.16",
+		"zod": "^3.24.1"
+	}
+}

@@ -1,0 +1,31 @@
+{
+	"name": "ai-trader",
+	"private": true,
+	"workspaces": [
+		"api"
+	],
+	"author": "Mario Reder <mario.reder@pm.me>",
+	"license": "MIT",
+	"type": "module",
+	"scripts": {
+		"api": "yarn workspace ai-trader-api",
+		"lint": "eslint --max-warnings=0 . && prettier --check .",
+		"format": "prettier --write ."
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20250109.0",
+		"@typescript-eslint/eslint-plugin": "^8.19.1",
+		"@typescript-eslint/parser": "^8.19.1",
+		"eslint": "^8.57.1",
+		"eslint-config-prettier": "^9.1.0",
+		"eslint-config-typescript": "^3.0.0",
+		"eslint-import-resolver-typescript": "^3.7.0",
+		"eslint-plugin-import": "^2.31.0",
+		"eslint-plugin-prettier": "^5.2.1",
+		"eslint-plugin-svelte": "^2.46.1",
+		"prettier": "^3.4.2",
+		"typescript": "5.7.3",
+		"typescript-eslint": "^8.19.1",
+		"wrangler": "^3.101.0"
+	}
+}

@@ -1,0 +1,13 @@
+{
+	"compilerOptions": {
+		"module": "ESNext",
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"skipLibCheck": true,
+		"sourceMap": true,
+		"strict": true,
+		"moduleResolution": "bundler",
+		"types": ["@cloudflare/workers-types/experimental"]
+	}
+}

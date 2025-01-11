@@ -12,13 +12,9 @@ mode = "smart"
 
 [vars]
 
-[durable_objects]
-
 [triggers]
-crons = ["*/15 * * * *"]
-
-[[migrations]]
+crons = ["*/5 * * * *"]
 
 [[kv_namespaces]]
 binding = "KV"
-id = "19f61b774756438ca781e93e120b2862"
+id = "0f16b792d035491e81094e8e118899ae"

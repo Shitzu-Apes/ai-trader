@@ -8,6 +8,7 @@ import { cors } from 'hono/cors';
 import { poweredBy } from 'hono/powered-by';
 import type { HTTPResponseError } from 'hono/types';
 
+import { fetchTaapiIndicators } from './taapi';
 import { EnvBindings } from './types';
 
 // eslint-disable-next-line import/no-named-as-default-member
@@ -52,10 +53,13 @@ export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		return app.fetch(request, env, ctx);
 	},
-	async scheduled(controller: ScheduledController, _env: EnvBindings, _ctx: ExecutionContext) {
+	async scheduled(controller: ScheduledController, env: EnvBindings, ctx: ExecutionContext) {
 		switch (controller.cron) {
-			case '*/15 * * * *':
-				// TODO
+			case '*/5 * * * *':
+				ctx.waitUntil(fetchTaapiIndicators('NEAR/USDT', env));
+				ctx.waitUntil(fetchTaapiIndicators('SOL/USDT', env));
+				ctx.waitUntil(fetchTaapiIndicators('BTC/USDT', env));
+				ctx.waitUntil(fetchTaapiIndicators('ETH/USDT', env));
 				break;
 		}
 	}

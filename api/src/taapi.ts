@@ -3,7 +3,7 @@ import { match } from 'ts-pattern';
 
 import { EnvBindings } from './types';
 
-type Indicators = {
+export type Indicators = {
 	candle: {
 		open: number;
 		high: number;
@@ -51,7 +51,9 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 	const now = dayjs();
 	const minutes = now.minute();
 	const currentTimeframe = Math.floor(minutes / 5) * 5;
-	const date = now.startOf('hour').add(currentTimeframe - 5, 'minute');
+	const date = now.startOf('hour').add(currentTimeframe, 'minute');
+
+	console.log('[date]', date.format('YYYY-MM-DD HH:mm'));
 
 	const response = await fetch('https://api.taapi.io/bulk', {
 		method: 'POST',

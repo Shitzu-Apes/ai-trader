@@ -8,6 +8,7 @@ import { cors } from 'hono/cors';
 import { poweredBy } from 'hono/powered-by';
 import type { HTTPResponseError } from 'hono/types';
 
+import datapoints from './datapoints';
 import { fetchTaapiIndicators } from './taapi';
 import { EnvBindings } from './types';
 
@@ -21,6 +22,8 @@ dayjs.extend(timezone);
 dayjs.extend(utc);
 
 const app = new Hono<Env>();
+
+app.route('/api', datapoints);
 
 app.use('*', poweredBy());
 app.use(

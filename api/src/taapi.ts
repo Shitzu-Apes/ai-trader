@@ -47,6 +47,19 @@ type BulkResponse = {
 	)[];
 };
 
+async function storeDatapoint(
+	db: D1Database,
+	symbol: string,
+	indicator: string,
+	timestamp: number,
+	data: unknown
+) {
+	const stmt = db.prepare(
+		'INSERT OR REPLACE INTO datapoints (symbol, indicator, timestamp, data) VALUES (?, ?, ?, ?)'
+	);
+	await stmt.bind(symbol, indicator, timestamp, JSON.stringify(data)).run();
+}
+
 export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 	const now = dayjs();
 	const minutes = now.minute();
@@ -79,45 +92,34 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 	});
 
 	const { data: bulkData } = (await response.json()) as BulkResponse;
+	const timestamp = date.valueOf();
 
 	await Promise.all(
 		bulkData.map(async (item) => {
 			match(item.id)
 				.with('candle', () => {
 					console.log(`[${symbol}]`, '[candle]', item.result);
-					return env.KV.put(`${symbol}-${item.id}-${date.valueOf()}`, JSON.stringify(item.result), {
-						expirationTtl: 60 * 60 * 24 * 30
-					});
+					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
 				})
 				.with('vwap', () => {
 					console.log(`[${symbol}]`, '[vwap]', item.result);
-					return env.KV.put(`${symbol}-${item.id}-${date.valueOf()}`, JSON.stringify(item.result), {
-						expirationTtl: 60 * 60 * 24 * 30
-					});
+					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
 				})
 				.with('atr', () => {
 					console.log(`[${symbol}]`, '[atr]', item.result);
-					return env.KV.put(`${symbol}-${item.id}-${date.valueOf()}`, JSON.stringify(item.result), {
-						expirationTtl: 60 * 60 * 24 * 30
-					});
+					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
 				})
 				.with('bbands', () => {
 					console.log(`[${symbol}]`, '[bbands]', item.result);
-					return env.KV.put(`${symbol}-${item.id}-${date.valueOf()}`, JSON.stringify(item.result), {
-						expirationTtl: 60 * 60 * 24 * 30
-					});
+					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
 				})
 				.with('rsi', () => {
 					console.log(`[${symbol}]`, '[rsi]', item.result);
-					return env.KV.put(`${symbol}-${item.id}-${date.valueOf()}`, JSON.stringify(item.result), {
-						expirationTtl: 60 * 60 * 24 * 30
-					});
+					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
 				})
 				.with('obv', () => {
 					console.log(`[${symbol}]`, '[obv]', item.result);
-					return env.KV.put(`${symbol}-${item.id}-${date.valueOf()}`, JSON.stringify(item.result), {
-						expirationTtl: 60 * 60 * 24 * 30
-					});
+					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
 				})
 				.otherwise(() => {
 					console.log(`Unknown indicator: ${item.id}`);

@@ -18,3 +18,8 @@ crons = ["*/5 * * * *"]
 [[kv_namespaces]]
 binding = "KV"
 id = "0f16b792d035491e81094e8e118899ae"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "datapoints"
+database_id = "8d4ed4d1-93f0-47a4-8498-ef41edeff017"

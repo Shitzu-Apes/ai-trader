@@ -7,7 +7,7 @@ import { EnvBindings } from './types';
 const app = new Hono<{ Bindings: EnvBindings }>();
 
 const symbolSchema = z.enum(['NEAR/USDT', 'SOL/USDT', 'BTC/USDT', 'ETH/USDT'] as const);
-const indicatorSchema = z.enum(['candle', 'vwap', 'atr', 'bbands', 'rsi', 'obv'] as const);
+const indicatorSchema = z.enum(['candle', 'vwap', 'atr', 'bbands', 'rsi', 'obv', 'depth'] as const);
 
 type DataPoint = {
 	id: number;

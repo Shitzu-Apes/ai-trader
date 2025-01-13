@@ -2,6 +2,7 @@ module.exports = {
 	apps: [
 		{
 			name: 'binance-api',
+			cwd: './binance-api',
 			script: 'node_modules/.bin/tsx',
 			args: 'src/index.ts',
 			watch: ['src'],

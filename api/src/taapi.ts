@@ -90,44 +90,61 @@ async function fetchDepth(symbol: string): Promise<Indicators['depth']> {
 	const limit = symbol.startsWith('BTC/') || symbol.startsWith('ETH/') ? 5000 : 500;
 
 	const response = await fetch(
-		`https://api.binance.com/api/v3/depth?symbol=${binanceSymbol}&limit=${limit}`
+		`https://api.binance.com/api/v3/depth?symbol=${binanceSymbol}&limit=${limit}`,
+		{
+			headers: {
+				'User-Agent':
+					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+				Accept: 'application/json',
+				'Accept-Encoding': 'gzip, deflate, br',
+				'Accept-Language': 'en-US,en;q=0.9'
+			}
+		}
 	);
-	const data = (await response.json()) as BinanceOrderbookResponse;
 
-	// Convert string values to numbers and sort by price
-	const bids = data.bids
-		.map(([price, size]) => ({ price: Number(price), size: Number(size) }))
-		.sort((a, b) => b.price - a.price); // Sort bids descending
+	// Log raw response if not JSON
+	const text = await response.text();
+	try {
+		const data = JSON.parse(text) as BinanceOrderbookResponse;
 
-	const asks = data.asks
-		.map(([price, size]) => ({ price: Number(price), size: Number(size) }))
-		.sort((a, b) => a.price - b.price); // Sort asks ascending
+		// Convert string values to numbers and sort by price
+		const bids = data.bids
+			.map(([price, size]) => ({ price: Number(price), size: Number(size) }))
+			.sort((a, b) => b.price - a.price); // Sort bids descending
 
-	const bestBid = bids[0].price;
-	const bestAsk = asks[0].price;
+		const asks = data.asks
+			.map(([price, size]) => ({ price: Number(price), size: Number(size) }))
+			.sort((a, b) => a.price - b.price); // Sort asks ascending
 
-	// Calculate thresholds (1%)
-	const bidThreshold = bestBid * 0.99;
-	const askThreshold = bestAsk * 1.01;
+		const bestBid = bids[0].price;
+		const bestAsk = asks[0].price;
 
-	// Calculate depths within 1%
-	const bidSize = bids
-		.filter((bid) => bid.price >= bidThreshold)
-		.reduce((sum, bid) => sum + bid.size, 0);
-	const askSize = asks
-		.filter((ask) => ask.price <= askThreshold)
-		.reduce((sum, ask) => sum + ask.size, 0);
+		// Calculate thresholds (1%)
+		const bidThreshold = bestBid * 0.99;
+		const askThreshold = bestAsk * 1.01;
 
-	// Count price levels within 1%
-	const bidLevels = bids.filter((bid) => bid.price >= bidThreshold).length;
-	const askLevels = asks.filter((ask) => ask.price <= askThreshold).length;
+		// Calculate depths within 1%
+		const bidSize = bids
+			.filter((bid) => bid.price >= bidThreshold)
+			.reduce((sum, bid) => sum + bid.size, 0);
+		const askSize = asks
+			.filter((ask) => ask.price <= askThreshold)
+			.reduce((sum, ask) => sum + ask.size, 0);
 
-	return {
-		bid_size: bidSize,
-		ask_size: askSize,
-		bid_levels: bidLevels,
-		ask_levels: askLevels
-	};
+		// Count price levels within 1%
+		const bidLevels = bids.filter((bid) => bid.price >= bidThreshold).length;
+		const askLevels = asks.filter((ask) => ask.price <= askThreshold).length;
+
+		return {
+			bid_size: bidSize,
+			ask_size: askSize,
+			bid_levels: bidLevels,
+			ask_levels: askLevels
+		};
+	} catch (error) {
+		console.error(`[Binance Depth API Error] Symbol: ${symbol}, Response:`, text);
+		throw error;
+	}
 }
 
 async function fetchLiquidationZones(symbol: string): Promise<Indicators['liq_zones']> {
@@ -136,16 +153,48 @@ async function fetchLiquidationZones(symbol: string): Promise<Indicators['liq_zo
 
 	// Get current mark price
 	const priceResponse = await fetch(
-		`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${binanceSymbol}`
+		`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${binanceSymbol}`,
+		{
+			headers: {
+				'User-Agent':
+					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+				Accept: 'application/json',
+				'Accept-Encoding': 'gzip, deflate, br',
+				'Accept-Language': 'en-US,en;q=0.9'
+			}
+		}
 	);
-	const priceData = (await priceResponse.json()) as BinanceFundingRateResponse;
+	const priceText = await priceResponse.text();
+	let priceData: BinanceFundingRateResponse;
+	try {
+		priceData = JSON.parse(priceText) as BinanceFundingRateResponse;
+	} catch (error) {
+		console.error(`[Binance Premium Index API Error] Symbol: ${symbol}, Response:`, priceText);
+		throw error;
+	}
 	const currentPrice = Number(priceData.markPrice);
 
 	// Get open interest
 	const response = await fetch(
-		`https://fapi.binance.com/futures/data/openInterestHist?symbol=${binanceSymbol}&period=5m&limit=1`
+		`https://fapi.binance.com/futures/data/openInterestHist?symbol=${binanceSymbol}&period=5m&limit=1`,
+		{
+			headers: {
+				'User-Agent':
+					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+				Accept: 'application/json',
+				'Accept-Encoding': 'gzip, deflate, br',
+				'Accept-Language': 'en-US,en;q=0.9'
+			}
+		}
 	);
-	const data = (await response.json()) as BinanceOpenInterestResponse[];
+	const text = await response.text();
+	let data: BinanceOpenInterestResponse[];
+	try {
+		data = JSON.parse(text) as BinanceOpenInterestResponse[];
+	} catch (error) {
+		console.error(`[Binance Open Interest API Error] Symbol: ${symbol}, Response:`, text);
+		throw error;
+	}
 	const latest = data[0];
 
 	// Assuming average leverage of 20x for estimation

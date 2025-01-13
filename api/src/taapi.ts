@@ -61,27 +61,6 @@ type BulkResponse = {
 	)[];
 };
 
-type BinanceOrderbookResponse = {
-	lastUpdateId: number;
-	bids: [string, string][]; // [price, quantity][]
-	asks: [string, string][]; // [price, quantity][]
-};
-
-type BinanceOpenInterestResponse = {
-	symbol: string;
-	sumOpenInterest: string;
-	sumOpenInterestValue: string;
-	timestamp: number;
-};
-
-type BinanceFundingRateResponse = {
-	symbol: string;
-	markPrice: string;
-	lastFundingRate: string;
-	nextFundingTime: number;
-	timestamp: number;
-};
-
 type NixtlaForecastResponse = {
 	timestamp: string[];
 	value: number[];
@@ -91,172 +70,41 @@ type NixtlaForecastResponse = {
 	request_id: string;
 };
 
-async function fetchDepth(symbol: string): Promise<Indicators['depth']> {
-	// Binance uses different symbol format (no slash)
-	const binanceSymbol = symbol.replace('/', '');
-
-	// Use deeper orderbook for BTC and ETH
-	const limit = symbol.startsWith('BTC/') || symbol.startsWith('ETH/') ? 5000 : 500;
-
-	const response = await fetch(
-		`https://api.binance.com/api/v3/depth?symbol=${binanceSymbol}&limit=${limit}`,
-		{
-			headers: {
-				'User-Agent':
-					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-				Accept: 'application/json',
-				'Accept-Encoding': 'gzip, deflate, br',
-				'Accept-Language': 'en-US,en;q=0.9'
-			}
-		}
-	);
-
-	// Log raw response if not JSON
-	const text = await response.text();
-	try {
-		const data = JSON.parse(text) as BinanceOrderbookResponse;
-
-		// Convert string values to numbers and sort by price
-		const bids = data.bids
-			.map(([price, size]) => ({ price: Number(price), size: Number(size) }))
-			.sort((a, b) => b.price - a.price); // Sort bids descending
-
-		const asks = data.asks
-			.map(([price, size]) => ({ price: Number(price), size: Number(size) }))
-			.sort((a, b) => a.price - b.price); // Sort asks ascending
-
-		const bestBid = bids[0].price;
-		const bestAsk = asks[0].price;
-
-		// Calculate thresholds (1%)
-		const bidThreshold = bestBid * 0.99;
-		const askThreshold = bestAsk * 1.01;
-
-		// Calculate depths within 1%
-		const bidSize = bids
-			.filter((bid) => bid.price >= bidThreshold)
-			.reduce((sum, bid) => sum + bid.size, 0);
-		const askSize = asks
-			.filter((ask) => ask.price <= askThreshold)
-			.reduce((sum, ask) => sum + ask.size, 0);
-
-		// Count price levels within 1%
-		const bidLevels = bids.filter((bid) => bid.price >= bidThreshold).length;
-		const askLevels = asks.filter((ask) => ask.price <= askThreshold).length;
-
-		return {
-			bid_size: bidSize,
-			ask_size: askSize,
-			bid_levels: bidLevels,
-			ask_levels: askLevels
-		};
-	} catch (error) {
-		console.error(`[Binance Depth API Error] Symbol: ${symbol}, Response:`, text);
-		throw error;
+async function fetchDepth(symbol: string, env?: EnvBindings): Promise<Indicators['depth']> {
+	if (!env?.BINANCE_API_URL) {
+		throw new Error('BINANCE_API_URL environment variable is not set');
 	}
+
+	const encodedSymbol = encodeURIComponent(symbol);
+	const response = await fetch(`${env.BINANCE_API_URL}/depth/${encodedSymbol}`);
+
+	if (!response.ok) {
+		const text = await response.text();
+		console.error(`[Binance API Error] Symbol: ${symbol}, Response:`, text);
+		throw new Error(`HTTP error! status: ${response.status}`);
+	}
+
+	return response.json();
 }
 
-async function fetchLiquidationZones(symbol: string): Promise<Indicators['liq_zones']> {
-	// Binance uses different symbol format (no slash)
-	const binanceSymbol = symbol.replace('/', '');
-
-	// Get current mark price
-	const priceResponse = await fetch(
-		`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${binanceSymbol}`,
-		{
-			headers: {
-				'User-Agent':
-					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-				Accept: 'application/json',
-				'Accept-Encoding': 'gzip, deflate, br',
-				'Accept-Language': 'en-US,en;q=0.9'
-			}
-		}
-	);
-	const priceText = await priceResponse.text();
-	let priceData: BinanceFundingRateResponse;
-	try {
-		priceData = JSON.parse(priceText) as BinanceFundingRateResponse;
-	} catch (error) {
-		console.error(`[Binance Premium Index API Error] Symbol: ${symbol}, Response:`, priceText);
-		throw error;
+async function fetchLiquidationZones(
+	symbol: string,
+	env?: EnvBindings
+): Promise<Indicators['liq_zones']> {
+	if (!env?.BINANCE_API_URL) {
+		throw new Error('BINANCE_API_URL environment variable is not set');
 	}
-	const currentPrice = Number(priceData.markPrice);
 
-	// Get open interest
-	const response = await fetch(
-		`https://fapi.binance.com/futures/data/openInterestHist?symbol=${binanceSymbol}&period=5m&limit=1`,
-		{
-			headers: {
-				'User-Agent':
-					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-				Accept: 'application/json',
-				'Accept-Encoding': 'gzip, deflate, br',
-				'Accept-Language': 'en-US,en;q=0.9'
-			}
-		}
-	);
-	const text = await response.text();
-	let data: BinanceOpenInterestResponse[];
-	try {
-		data = JSON.parse(text) as BinanceOpenInterestResponse[];
-	} catch (error) {
-		console.error(`[Binance Open Interest API Error] Symbol: ${symbol}, Response:`, text);
-		throw error;
+	const encodedSymbol = encodeURIComponent(symbol);
+	const response = await fetch(`${env.BINANCE_API_URL}/liquidation-zones/${encodedSymbol}`);
+
+	if (!response.ok) {
+		const text = await response.text();
+		console.error(`[Binance API Error] Symbol: ${symbol}, Response:`, text);
+		throw new Error(`HTTP error! status: ${response.status}`);
 	}
-	const latest = data[0];
 
-	// Assuming average leverage of 20x for estimation
-	const avgLeverage = 20;
-	const riskThreshold = 0.05; // 5% from liquidation price
-
-	// Calculate liquidation prices
-	const longLiqPrice = currentPrice * (1 - 1 / avgLeverage);
-	const longAtRiskPrice = longLiqPrice * (1 + riskThreshold);
-	const shortLiqPrice = currentPrice * (1 + 1 / avgLeverage);
-	const shortAtRiskPrice = shortLiqPrice * (1 - riskThreshold);
-
-	// Calculate risk ratios
-	const longRiskRatio =
-		currentPrice <= longAtRiskPrice
-			? Math.max(
-					0,
-					Math.min(1, (longAtRiskPrice - currentPrice) / (longAtRiskPrice - longLiqPrice))
-				)
-			: 0;
-
-	const shortRiskRatio =
-		currentPrice >= shortAtRiskPrice
-			? Math.max(
-					0,
-					Math.min(1, (currentPrice - shortAtRiskPrice) / (shortLiqPrice - shortAtRiskPrice))
-				)
-			: 0;
-
-	// Parse total open interest and split it based on risk ratios
-	const totalOpenInterest = Number(latest.sumOpenInterest);
-
-	// Assume 50/50 split between longs and shorts when we don't have detailed data
-	const estimatedLongOpenInterest = totalOpenInterest * 0.5;
-	const estimatedShortOpenInterest = totalOpenInterest * 0.5;
-
-	// Calculate final values
-	const longSize = estimatedLongOpenInterest * longRiskRatio;
-	const shortSize = estimatedShortOpenInterest * shortRiskRatio;
-
-	// Estimate number of accounts based on average position size
-	const avgPositionSize = 100; // Assume average position is 100 units
-	const longAccounts = Math.round(longSize / avgPositionSize);
-	const shortAccounts = Math.round(shortSize / avgPositionSize);
-
-	return {
-		long_size: longSize,
-		short_size: shortSize,
-		long_accounts: longAccounts,
-		short_accounts: shortAccounts,
-		avg_long_price: longLiqPrice,
-		avg_short_price: shortLiqPrice
-	};
+	return response.json();
 }
 
 async function storeDatapoint(
@@ -488,7 +336,7 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 
 	// Fetch depth
 	try {
-		const depth = await fetchDepth(symbol);
+		const depth = await fetchDepth(symbol, env);
 		console.log(`[${symbol}]`, '[depth]', depth);
 		await storeDatapoint(env.DB, symbol, 'depth', timestamp, depth);
 	} catch (error) {
@@ -497,7 +345,7 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 
 	// Fetch liquidation zones
 	try {
-		const liqZones = await fetchLiquidationZones(symbol);
+		const liqZones = await fetchLiquidationZones(symbol, env);
 		console.log(`[${symbol}]`, '[liq_zones]', liqZones);
 		await storeDatapoint(env.DB, symbol, 'liq_zones', timestamp, liqZones);
 	} catch (error) {

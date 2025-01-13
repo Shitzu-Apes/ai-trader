@@ -2,13 +2,15 @@
 	"name": "ai-trader",
 	"private": true,
 	"workspaces": [
-		"api"
+		"api",
+		"binance-api"
 	],
 	"author": "Mario Reder <mario.reder@pm.me>",
 	"license": "MIT",
 	"type": "module",
 	"scripts": {
 		"api": "yarn workspace ai-trader-api",
+		"binance-api": "yarn workspace binance-api",
 		"lint": "eslint --max-warnings=0 . && prettier --check .",
 		"format": "prettier --write ."
 	},
@@ -24,6 +26,7 @@
 		"eslint-plugin-prettier": "^5.2.1",
 		"eslint-plugin-svelte": "^2.46.1",
 		"prettier": "^3.4.2",
+		"tsx": "^4.19.2",
 		"typescript": "5.7.3",
 		"typescript-eslint": "^8.19.1",
 		"wrangler": "^3.101.0"

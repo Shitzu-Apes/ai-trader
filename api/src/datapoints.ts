@@ -2,6 +2,7 @@ import dayjs from 'dayjs';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
+import { makeForecast } from './taapi';
 import { EnvBindings } from './types';
 
 const app = new Hono<{ Bindings: EnvBindings }>();
@@ -225,6 +226,44 @@ app.get('/history/:symbol', async (c) => {
 		});
 	} catch (error) {
 		console.error('Error fetching historical data for all indicators:', error);
+		return c.json({ error: 'Internal server error' }, 500);
+	}
+});
+
+// Get forecast for a symbol
+app.get('/forecast/:symbol', async (c) => {
+	const symbol = c.req.param('symbol');
+
+	if (!symbolSchema.safeParse(symbol).success) {
+		return c.json({ error: 'Invalid symbol' }, 400);
+	}
+
+	const fh = Number(c.req.query('fh') ?? '12');
+	if (isNaN(fh) || fh < 1 || fh > 288) {
+		// max 24 hours (288 * 5min)
+		return c.json({ error: 'Invalid forecast horizon. Must be between 1 and 288' }, 400);
+	}
+
+	try {
+		const forecast = await makeForecast(c.env, symbol, fh);
+		return c.json({
+			symbol,
+			forecast: forecast.timestamp.reduce(
+				(acc, ts, i) => {
+					acc[ts] = forecast.value[i];
+					return acc;
+				},
+				{} as Record<string, number>
+			),
+			metadata: {
+				input_tokens: forecast.input_tokens,
+				output_tokens: forecast.output_tokens,
+				finetune_tokens: forecast.finetune_tokens,
+				request_id: forecast.request_id
+			}
+		});
+	} catch (error) {
+		console.error('Error making forecast:', error);
 		return c.json({ error: 'Internal server error' }, 500);
 	}
 });

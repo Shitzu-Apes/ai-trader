@@ -22,9 +22,6 @@ module.exports = {
 				PORT: 3001
 			},
 			log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-			merge_logs: true,
-			error_file: 'logs/error.log',
-			out_file: 'logs/out.log',
 			time: true
 		}
 	]

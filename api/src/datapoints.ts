@@ -19,6 +19,18 @@ type DataPoint = {
 	created_at: string;
 };
 
+type ForecastResponse = {
+	symbol: string;
+	timestamp: number;
+	forecast: Record<string, number>;
+	metadata: {
+		input_tokens: number;
+		output_tokens: number;
+		finetune_tokens: number;
+		request_id: string;
+	};
+};
+
 // Helper function to get the current 5-minute timeframe
 function getCurrentTimeframe() {
 	const now = dayjs();
@@ -238,30 +250,68 @@ app.get('/forecast/:symbol', async (c) => {
 		return c.json({ error: 'Invalid symbol' }, 400);
 	}
 
-	const fh = Number(c.req.query('fh') ?? '12');
-	if (isNaN(fh) || fh < 1 || fh > 288) {
-		// max 24 hours (288 * 5min)
-		return c.json({ error: 'Invalid forecast horizon. Must be between 1 and 288' }, 400);
-	}
+	const currentTimeframe = getCurrentTimeframe();
+	const cacheKey = `forecast:${symbol}`;
+	const lastForecastKey = `last_forecast:${symbol}`;
 
 	try {
-		const forecast = await makeForecast(c.env, symbol, fh);
-		return c.json({
-			symbol,
-			forecast: forecast.timestamp.reduce(
-				(acc, ts, i) => {
-					acc[ts] = forecast.value[i];
-					return acc;
-				},
-				{} as Record<string, number>
-			),
-			metadata: {
-				input_tokens: forecast.input_tokens,
-				output_tokens: forecast.output_tokens,
-				finetune_tokens: forecast.finetune_tokens,
-				request_id: forecast.request_id
+		// Try to get from cache first
+		const cached = await c.env.KV.get<ForecastResponse>(cacheKey, 'json');
+		if (cached) {
+			console.log(`Cache hit for ${cacheKey}`);
+			return c.json(cached);
+		}
+
+		console.log(`Cache miss for ${cacheKey}, making new forecast`);
+
+		try {
+			const forecast = await makeForecast(c.env, symbol, 12); // Fixed 1-hour forecast (12 * 5min)
+
+			const response: ForecastResponse = {
+				symbol,
+				timestamp: currentTimeframe.valueOf(),
+				forecast: forecast.timestamp.reduce(
+					(acc, ts, i) => {
+						acc[ts] = forecast.value[i];
+						return acc;
+					},
+					{} as Record<string, number>
+				),
+				metadata: {
+					input_tokens: forecast.input_tokens,
+					output_tokens: forecast.output_tokens,
+					finetune_tokens: forecast.finetune_tokens,
+					request_id: forecast.request_id
+				}
+			};
+
+			// Store both the current cache and last successful forecast
+			await Promise.all([
+				c.env.KV.put(cacheKey, JSON.stringify(response), {
+					// Set TTL to expire at the end of current 5min interval
+					expirationTtl: Math.ceil(
+						(currentTimeframe.add(5, 'minute').valueOf() - Date.now()) / 1000
+					)
+				}),
+				// Store last successful forecast with longer TTL (24 hours)
+				c.env.KV.put(lastForecastKey, JSON.stringify(response), {
+					expirationTtl: 24 * 60 * 60
+				})
+			]);
+
+			return c.json(response);
+		} catch (error: unknown) {
+			if (error instanceof Error && error.message === 'No historical data found') {
+				// Get the last successful forecast from KV
+				const lastForecast = await c.env.KV.get<ForecastResponse>(lastForecastKey, 'json');
+				if (lastForecast) {
+					console.log(`Using last available forecast for ${symbol}`);
+					return c.json(lastForecast);
+				}
+				return c.json({ error: 'No forecast data available yet' }, 404);
 			}
-		});
+			throw error;
+		}
 	} catch (error) {
 		console.error('Error making forecast:', error);
 		return c.json({ error: 'Internal server error' }, 500);

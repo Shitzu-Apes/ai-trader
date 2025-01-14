@@ -140,18 +140,28 @@ async function storeDatapoint(
 
 async function fetchHistoricalData(
 	db: D1Database,
-	symbol: string,
-	limit: number = 50
+	symbol: string
 ): Promise<{
 	timestamps: string[];
 	y: Record<string, number>;
 	x: Record<string, number[]>;
 }> {
+	// Use 288 datapoints = last 24 hours of 5min intervals
+	const HISTORY_LIMIT = 288;
+
+	// Get the end of the previous 5min interval
+	const now = dayjs();
+	const minutes = now.minute();
+	const currentTimeframe = Math.floor(minutes / 5) * 5;
+	const previousTimeframe = now.startOf('hour').add(currentTimeframe - 5, 'minute');
+
 	const query = `
 		WITH timestamps AS (
 			SELECT DISTINCT timestamp
 			FROM datapoints
-			WHERE symbol = ? AND indicator = 'candle'
+			WHERE symbol = ? 
+			AND indicator = 'candle'
+			AND timestamp <= ?
 			ORDER BY timestamp DESC
 			LIMIT ?
 		)
@@ -163,7 +173,7 @@ async function fetchHistoricalData(
 	`;
 
 	const stmt = db.prepare(query);
-	const results = await stmt.bind(symbol, limit, symbol).all<{
+	const results = await stmt.bind(symbol, previousTimeframe.valueOf(), HISTORY_LIMIT, symbol).all<{
 		indicator: string;
 		timestamp: number;
 		data: string;
@@ -172,6 +182,8 @@ async function fetchHistoricalData(
 	if (!results.results?.length) {
 		throw new Error('No historical data found');
 	}
+
+	console.log(`Fetching data up to ${previousTimeframe.format('YYYY-MM-DD HH:mm:ss')}`);
 
 	// Group data by timestamp
 	const groupedData = new Map<number, Record<string, Record<string, number>>>();
@@ -184,9 +196,9 @@ async function fetchHistoricalData(
 
 	// Initialize arrays for all indicators
 	const x: Record<string, number[]> = {
+		open: [],
 		high: [],
 		low: [],
-		close: [],
 		volume: [],
 		vwap: [],
 		atr: [],
@@ -253,7 +265,12 @@ async function fetchHistoricalData(
 				data.liq_zones.avg_short_price
 			];
 
-			return values.every((v) => !isNaN(v) && v !== null && v !== undefined);
+			const hasInvalidValue = values.some((v) => isNaN(v) || v === null || v === undefined);
+			if (hasInvalidValue) {
+				return false;
+			}
+
+			return true;
 		})
 		.sort((a, b) => a - b);
 
@@ -270,12 +287,12 @@ async function fetchHistoricalData(
 		const data = groupedData.get(completeTimestamps[i])!;
 
 		// Target variable (y)
-		y[ts] = data.candle.open;
+		y[ts] = data.candle.close;
 
 		// Exogenous variables (x)
+		x.open.push(data.candle.open);
 		x.high.push(data.candle.high);
 		x.low.push(data.candle.low);
-		x.close.push(data.candle.close);
 		x.volume.push(data.candle.volume);
 		x.vwap.push(data.vwap.value);
 		x.atr.push(data.atr.value);

@@ -60,9 +60,9 @@ export default {
 		switch (controller.cron) {
 			case '*/5 * * * *':
 				ctx.waitUntil(fetchTaapiIndicators('NEAR/USDT', env));
-				ctx.waitUntil(fetchTaapiIndicators('SOL/USDT', env));
-				ctx.waitUntil(fetchTaapiIndicators('BTC/USDT', env));
-				ctx.waitUntil(fetchTaapiIndicators('ETH/USDT', env));
+				// ctx.waitUntil(fetchTaapiIndicators('SOL/USDT', env));
+				// ctx.waitUntil(fetchTaapiIndicators('BTC/USDT', env));
+				// ctx.waitUntil(fetchTaapiIndicators('ETH/USDT', env));
 				break;
 		}
 	}

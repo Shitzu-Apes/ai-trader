@@ -183,8 +183,6 @@ async function fetchHistoricalData(
 		throw new Error('No historical data found');
 	}
 
-	console.log(`Fetching data up to ${previousTimeframe.format('YYYY-MM-DD HH:mm:ss')}`);
-
 	// Group data by timestamp
 	const groupedData = new Map<number, Record<string, Record<string, number>>>();
 	results.results.forEach((row) => {
@@ -194,52 +192,28 @@ async function fetchHistoricalData(
 		groupedData.get(row.timestamp)![row.indicator] = JSON.parse(row.data);
 	});
 
-	// Initialize arrays for all indicators
-	const x: Record<string, number[]> = {
-		open: [],
-		high: [],
-		low: [],
-		volume: [],
-		vwap: [],
-		atr: [],
-		bbands_upper: [],
-		bbands_middle: [],
-		bbands_lower: [],
-		rsi: [],
-		obv: [],
-		bid_size: [],
-		ask_size: [],
-		bid_levels: [],
-		ask_levels: [],
-		long_size: [],
-		short_size: [],
-		long_accounts: [],
-		short_accounts: [],
-		avg_long_price: [],
-		avg_short_price: []
-	};
-
 	// Filter timestamps to only include those with complete data
 	const completeTimestamps = Array.from(groupedData.keys())
 		.filter((ts) => {
 			const data = groupedData.get(ts)!;
+
 			// Check for required indicators
-			if (
-				!(
-					data.candle &&
-					data.vwap &&
-					data.atr &&
-					data.bbands &&
-					data.rsi &&
-					data.obv &&
-					data.depth &&
-					data.liq_zones
-				)
-			) {
+			const requiredIndicators = [
+				'candle',
+				'vwap',
+				'atr',
+				'bbands',
+				'rsi',
+				'obv',
+				'depth',
+				'liq_zones'
+			];
+			const hasAllIndicators = requiredIndicators.every((indicator) => data[indicator]);
+			if (!hasAllIndicators) {
 				return false;
 			}
 
-			// Check for NaN values in all fields
+			// Extract all values that will be used
 			const values = [
 				data.candle.open,
 				data.candle.high,
@@ -265,22 +239,24 @@ async function fetchHistoricalData(
 				data.liq_zones.avg_short_price
 			];
 
-			const hasInvalidValue = values.some((v) => isNaN(v) || v === null || v === undefined);
-			if (hasInvalidValue) {
-				return false;
-			}
+			// Check for any invalid values
+			const hasInvalidValue = values.some((v) => {
+				const isInvalid = v === null || v === undefined || isNaN(v) || !isFinite(v);
+				return isInvalid;
+			});
 
-			return true;
+			return !hasInvalidValue;
 		})
 		.sort((a, b) => a - b);
 
-	console.log(
-		`Found ${completeTimestamps.length} valid timestamps out of ${groupedData.size} total`
-	);
+	if (completeTimestamps.length === 0) {
+		throw new Error('No complete data found for any timestamp');
+	}
 
 	// Convert to Nixtla format
 	const timestamps = completeTimestamps.map((ts) => dayjs(ts).format('YYYY-MM-DD HH:mm:ss'));
 	const y: Record<string, number> = {};
+	const x: Record<string, number[]> = {};
 
 	// Collect data only from complete timestamps
 	timestamps.forEach((ts, i) => {
@@ -290,36 +266,29 @@ async function fetchHistoricalData(
 		y[ts] = data.candle.close;
 
 		// Exogenous variables (x)
-		x.open.push(data.candle.open);
-		x.high.push(data.candle.high);
-		x.low.push(data.candle.low);
-		x.volume.push(data.candle.volume);
-		x.vwap.push(data.vwap.value);
-		x.atr.push(data.atr.value);
-		x.bbands_upper.push(data.bbands.valueUpperBand);
-		x.bbands_middle.push(data.bbands.valueMiddleBand);
-		x.bbands_lower.push(data.bbands.valueLowerBand);
-		x.rsi.push(data.rsi.value);
-		x.obv.push(data.obv.value);
-		x.bid_size.push(data.depth.bid_size);
-		x.ask_size.push(data.depth.ask_size);
-		x.bid_levels.push(data.depth.bid_levels);
-		x.ask_levels.push(data.depth.ask_levels);
-		x.long_size.push(data.liq_zones.long_size);
-		x.short_size.push(data.liq_zones.short_size);
-		x.long_accounts.push(data.liq_zones.long_accounts);
-		x.short_accounts.push(data.liq_zones.short_accounts);
-		x.avg_long_price.push(data.liq_zones.avg_long_price);
-		x.avg_short_price.push(data.liq_zones.avg_short_price);
-	});
-
-	// Verify all arrays have the same length
-	const targetLength = timestamps.length;
-	Object.entries(x).forEach(([key, values]) => {
-		if (values.length !== targetLength) {
-			console.error(`Array length mismatch for ${key}: ${values.length}/${targetLength}`);
-			throw new Error('Data integrity error: array length mismatch');
-		}
+		x[ts] = [
+			data.candle.open,
+			data.candle.high,
+			data.candle.low,
+			data.candle.volume,
+			data.vwap.value,
+			data.atr.value,
+			data.bbands.valueUpperBand,
+			data.bbands.valueMiddleBand,
+			data.bbands.valueLowerBand,
+			data.rsi.value,
+			data.obv.value,
+			data.depth.bid_size,
+			data.depth.ask_size,
+			data.depth.bid_levels,
+			data.depth.ask_levels,
+			data.liq_zones.long_size,
+			data.liq_zones.short_size,
+			data.liq_zones.long_accounts,
+			data.liq_zones.short_accounts,
+			data.liq_zones.avg_long_price,
+			data.liq_zones.avg_short_price
+		];
 	});
 
 	return { timestamps, y, x };
@@ -332,6 +301,19 @@ export async function makeForecast(
 ): Promise<NixtlaForecastResponse> {
 	// Get historical data
 	const { y, x } = await fetchHistoricalData(env.DB, symbol);
+
+	const currentTimeframe = dayjs().startOf('minute');
+	const cacheKey = `forecast:${symbol}`;
+	const lastForecastKey = `last_forecast:${symbol}`;
+
+	// Try to get from cache first
+	const cached = await env.KV.get<NixtlaForecastResponse>(cacheKey, 'json');
+	if (cached) {
+		console.log(`Cache hit for ${cacheKey}`);
+		return cached;
+	}
+
+	console.log(`Cache miss for ${cacheKey}, making new forecast`);
 
 	// Make forecast request
 	const response = await fetch('https://api.nixtla.io/forecast', {
@@ -357,7 +339,21 @@ export async function makeForecast(
 		throw new Error(`Nixtla API error: ${response.status}`);
 	}
 
-	return response.json();
+	const forecast = (await response.json()) as NixtlaForecastResponse;
+
+	// Store both the current cache and last successful forecast
+	await Promise.all([
+		env.KV.put(cacheKey, JSON.stringify(forecast), {
+			// Set TTL to expire at the end of current 5min interval
+			expirationTtl: Math.ceil((currentTimeframe.add(5, 'minute').valueOf() - Date.now()) / 1000)
+		}),
+		// Store last successful forecast with longer TTL (24 hours)
+		env.KV.put(lastForecastKey, JSON.stringify(forecast), {
+			expirationTtl: 24 * 60 * 60
+		})
+	]);
+
+	return forecast;
 }
 
 export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
@@ -445,4 +441,15 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 				});
 		})
 	);
+
+	// Make forecast after all indicators are fetched and stored
+	try {
+		console.log(`[${symbol}]`, '[forecast] Making forecast...');
+		const forecast = await makeForecast(env, symbol);
+		console.log(`[${symbol}]`, '[forecast] Success:', forecast);
+		return forecast;
+	} catch (error) {
+		console.error('Error making forecast:', error);
+		throw error;
+	}
 }

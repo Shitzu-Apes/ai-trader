@@ -70,21 +70,47 @@ type NixtlaForecastResponse = {
 	request_id: string;
 };
 
+async function sleep(ms: number) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry<T>(
+	url: string,
+	maxRetries: number = 3,
+	baseDelay: number = 1000
+): Promise<T> {
+	let lastError: Error | null = null;
+
+	for (let attempt = 0; attempt < maxRetries; attempt++) {
+		try {
+			const response = await fetch(url);
+			if (!response.ok) {
+				const text = await response.text();
+				throw new Error(`HTTP error: [${response.status}] ${text}`);
+			}
+			return response.json();
+		} catch (error) {
+			lastError = error as Error;
+			console.error(`Attempt ${attempt + 1}/${maxRetries} failed:`, error);
+
+			if (attempt < maxRetries - 1) {
+				const delay = baseDelay * (attempt + 1); // Linear backoff
+				console.log(`Retrying in ${delay}ms...`);
+				await sleep(delay);
+			}
+		}
+	}
+
+	throw lastError ?? new Error('All retry attempts failed');
+}
+
 async function fetchDepth(symbol: string, env?: EnvBindings): Promise<Indicators['depth']> {
 	if (!env?.BINANCE_API_URL) {
 		throw new Error('BINANCE_API_URL environment variable is not set');
 	}
 
 	const encodedSymbol = encodeURIComponent(symbol);
-	const response = await fetch(`${env.BINANCE_API_URL}/depth/${encodedSymbol}`);
-
-	if (!response.ok) {
-		const text = await response.text();
-		console.error(`[Binance API Error] Symbol: ${symbol}, Response:`, text);
-		throw new Error(`HTTP error: [${response.status}] ${await response.text()}`);
-	}
-
-	return response.json();
+	return fetchWithRetry(`${env.BINANCE_API_URL}/depth/${encodedSymbol}`);
 }
 
 async function fetchLiquidationZones(
@@ -96,15 +122,7 @@ async function fetchLiquidationZones(
 	}
 
 	const encodedSymbol = encodeURIComponent(symbol);
-	const response = await fetch(`${env.BINANCE_API_URL}/liquidation-zones/${encodedSymbol}`);
-
-	if (!response.ok) {
-		const text = await response.text();
-		console.error(`[Binance API Error] Symbol: ${symbol}, Response:`, text);
-		throw new Error(`HTTP error: [${response.status}] ${await response.text()}`);
-	}
-
-	return response.json();
+	return fetchWithRetry(`${env.BINANCE_API_URL}/liquidation-zones/${encodedSymbol}`);
 }
 
 async function storeDatapoint(

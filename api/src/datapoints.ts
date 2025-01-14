@@ -20,7 +20,7 @@ type DataPoint = {
 };
 
 // Helper function to get the current 5-minute timeframe
-function getCurrentTimeframe() {
+export function getCurrentTimeframe() {
 	const now = dayjs();
 	const minutes = now.minute();
 	const currentTimeframe = Math.floor(minutes / 5) * 5;

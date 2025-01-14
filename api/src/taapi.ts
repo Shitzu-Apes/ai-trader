@@ -1,6 +1,7 @@
 import dayjs from 'dayjs';
 import { match } from 'ts-pattern';
 
+import { getCurrentTimeframe } from './datapoints';
 import { EnvBindings } from './types';
 
 export type Indicators = {
@@ -149,11 +150,8 @@ async function fetchHistoricalData(
 	// Use 288 datapoints = last 24 hours of 5min intervals
 	const HISTORY_LIMIT = 288;
 
-	// Get the end of the previous 5min interval
-	const now = dayjs();
-	const minutes = now.minute();
-	const currentTimeframe = Math.floor(minutes / 5) * 5;
-	const previousTimeframe = now.startOf('hour').add(currentTimeframe - 5, 'minute');
+	// Get the current 5min interval using the helper function
+	const currentTimeframe = getCurrentTimeframe();
 
 	const query = `
 		WITH timestamps AS (
@@ -173,7 +171,7 @@ async function fetchHistoricalData(
 	`;
 
 	const stmt = db.prepare(query);
-	const results = await stmt.bind(symbol, previousTimeframe.valueOf(), HISTORY_LIMIT, symbol).all<{
+	const results = await stmt.bind(symbol, currentTimeframe.valueOf(), HISTORY_LIMIT, symbol).all<{
 		indicator: string;
 		timestamp: number;
 		data: string;
@@ -297,14 +295,25 @@ async function fetchHistoricalData(
 export async function makeForecast(
 	env: EnvBindings,
 	symbol: string,
-	fh: number = 12 // 1 hour by default (12 * 5min)
+	fh: number = 24 // 2 hours by default (24 * 5min)
 ): Promise<NixtlaForecastResponse> {
 	// Get historical data
-	const { y, x } = await fetchHistoricalData(env.DB, symbol);
+	const { timestamps, y, x } = await fetchHistoricalData(env.DB, symbol);
+	console.log(`[${symbol}] [forecast] [y]`, y);
 
-	const currentTimeframe = dayjs().startOf('minute');
+	const currentTimeframe = getCurrentTimeframe();
 	const cacheKey = `forecast:${symbol}`;
 	const lastForecastKey = `last_forecast:${symbol}`;
+
+	// Check if the latest timestamp matches the current timeframe
+	if (timestamps[timestamps.length - 1] !== currentTimeframe.format('YYYY-MM-DD HH:mm:ss')) {
+		console.log(`Data fetch is still pending for ${symbol}, returning last forecast`);
+		const lastForecast = await env.KV.get<NixtlaForecastResponse>(lastForecastKey, 'json');
+		if (lastForecast) {
+			return lastForecast;
+		}
+		throw new Error('No recent forecast available');
+	}
 
 	// Try to get from cache first
 	const cached = await env.KV.get<NixtlaForecastResponse>(cacheKey, 'json');

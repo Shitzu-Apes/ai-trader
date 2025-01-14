@@ -81,7 +81,7 @@ async function fetchDepth(symbol: string, env?: EnvBindings): Promise<Indicators
 	if (!response.ok) {
 		const text = await response.text();
 		console.error(`[Binance API Error] Symbol: ${symbol}, Response:`, text);
-		throw new Error(`HTTP error! status: ${response.status}`);
+		throw new Error(`HTTP error: [${response.status}] ${await response.text()}`);
 	}
 
 	return response.json();
@@ -101,7 +101,7 @@ async function fetchLiquidationZones(
 	if (!response.ok) {
 		const text = await response.text();
 		console.error(`[Binance API Error] Symbol: ${symbol}, Response:`, text);
-		throw new Error(`HTTP error! status: ${response.status}`);
+		throw new Error(`HTTP error: [${response.status}] ${await response.text()}`);
 	}
 
 	return response.json();

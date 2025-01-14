@@ -24,7 +24,7 @@ export async function fetchDepth(symbol: string): Promise<DepthResponse> {
 	);
 
 	if (!response.ok) {
-		throw new Error(`HTTP error! status: ${response.status}`);
+		throw new Error(`HTTP error: [${response.status}] ${await response.text()}`);
 	}
 
 	const data = (await response.json()) as BinanceOrderbookResponse;
@@ -74,7 +74,7 @@ export async function fetchLiquidationZones(symbol: string): Promise<Liquidation
 	);
 
 	if (!priceResponse.ok) {
-		throw new Error(`HTTP error! status: ${priceResponse.status}`);
+		throw new Error(`HTTP error: [${priceResponse.status}] ${await priceResponse.text()}`);
 	}
 
 	const priceData = (await priceResponse.json()) as BinanceFundingRateResponse;
@@ -86,7 +86,7 @@ export async function fetchLiquidationZones(symbol: string): Promise<Liquidation
 	);
 
 	if (!response.ok) {
-		throw new Error(`HTTP error! status: ${response.status}`);
+		throw new Error(`HTTP error: [${response.status}] ${await response.text()}`);
 	}
 
 	const data = (await response.json()) as BinanceOpenInterestResponse[];

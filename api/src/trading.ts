@@ -5,8 +5,10 @@ import { EnvBindings } from './types';
 const TRADING_CONFIG = {
 	DECAY_ALPHA: 0.95, // Exponential decay factor for new positions
 	DECAY_ALPHA_EXISTING: 0.9, // More conservative decay factor for existing positions
-	UPPER_THRESHOLD: 0.003, // +0.3% threshold for buying
-	LOWER_THRESHOLD: -0.003, // -0.3% threshold for selling
+	UPPER_THRESHOLD: 0.0015, // +0.15% threshold for buying new positions
+	LOWER_THRESHOLD: -0.0015, // -0.15% threshold for selling new positions
+	UPPER_THRESHOLD_EXISTING: 0, // +0% threshold when position exists
+	LOWER_THRESHOLD_EXISTING: 0, // -0% threshold when position exists
 	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss threshold
 	INITIAL_BALANCE: 1000, // Initial USDC balance
 	TRADING_FEE: 0.0005 // 0.05% trading fee
@@ -65,8 +67,18 @@ export async function closePosition(
 
 		// Update USDC balance
 		const currentBalance = await getBalance(env);
-		const newBalance =
-			currentBalance + closingPnl - calculateTradingFees(currentPrice, position.size);
+		const closingFees = calculateTradingFees(currentPrice, position.size);
+		// Add back the entire position value (not just PnL)
+		const newBalance = currentBalance + position.size * currentPrice - closingFees;
+
+		console.log(
+			`[${symbol}] [trade] Closing balance update:`,
+			`Current=${currentBalance}`,
+			`Position Value=${position.size * currentPrice}`,
+			`Fees=${closingFees}`,
+			`New=${newBalance}`
+		);
+
 		await updateBalance(env, newBalance);
 
 		// Store the final state before deleting
@@ -163,10 +175,16 @@ export async function analyzeForecast(
 	// Take only first 12 forecast datapoints (1 hour)
 	const shortTermForecast = forecast.value.slice(0, 12);
 
-	// Use more conservative decay for existing positions
+	// Use more conservative parameters for existing positions
 	const decayAlpha = currentPosition
 		? TRADING_CONFIG.DECAY_ALPHA_EXISTING
 		: TRADING_CONFIG.DECAY_ALPHA;
+	const upperThreshold = currentPosition
+		? TRADING_CONFIG.UPPER_THRESHOLD_EXISTING
+		: TRADING_CONFIG.UPPER_THRESHOLD;
+	const lowerThreshold = currentPosition
+		? TRADING_CONFIG.LOWER_THRESHOLD_EXISTING
+		: TRADING_CONFIG.LOWER_THRESHOLD;
 
 	// Calculate time-decayed average of predicted prices
 	const decayedAvgPrice = getTimeDecayedAverage(shortTermForecast, decayAlpha);
@@ -180,14 +198,15 @@ export async function analyzeForecast(
 		`DecayedAvg=${decayedAvgPrice}`,
 		`Diff=${(diffPct * 100).toFixed(4)}%`,
 		`Using ${shortTermForecast.length} forecast points`,
-		`Decay=${decayAlpha}`
+		`Decay=${decayAlpha}`,
+		`Thresholds=${(upperThreshold * 100).toFixed(3)}%/${(lowerThreshold * 100).toFixed(3)}%`
 	);
 
 	// Generate signal based on thresholds
 	let signal: 'buy' | 'sell' | 'hold';
-	if (diffPct > TRADING_CONFIG.UPPER_THRESHOLD) {
+	if (diffPct > upperThreshold) {
 		signal = 'buy';
-	} else if (diffPct < TRADING_CONFIG.LOWER_THRESHOLD) {
+	} else if (diffPct < lowerThreshold) {
 		signal = 'sell';
 	} else {
 		signal = 'hold';
@@ -204,8 +223,7 @@ export async function analyzeForecast(
 			}
 
 			// Calculate position size in base currency
-			const positionSizeUSDC = balance * 0.99; // Leave some for fees
-			const size = positionSizeUSDC / currentPrice;
+			const size = balance / currentPrice;
 
 			// Get previous trading stats
 			const statsKey = `stats:${symbol}`;
@@ -240,8 +258,7 @@ export async function analyzeForecast(
 			);
 			await updatePosition(env, newPosition);
 		} else {
-			// Already have a position, update PnL
-			console.log(`[${symbol}] [trade] Maintaining position`);
+			console.log(`[${symbol}] [trade] Holding position`);
 			await updatePositionPnL(env, symbol, currentPrice);
 		}
 	} else if (signal === 'sell') {

@@ -62,7 +62,7 @@ type BulkResponse = {
 	)[];
 };
 
-type NixtlaForecastResponse = {
+export type NixtlaForecastResponse = {
 	timestamp: string[];
 	value: number[];
 	input_tokens: number;
@@ -294,12 +294,10 @@ async function fetchHistoricalData(
 
 export async function makeForecast(
 	env: EnvBindings,
-	symbol: string,
-	fh: number = 24 // 2 hours by default (24 * 5min)
+	symbol: string
 ): Promise<NixtlaForecastResponse> {
 	// Get historical data
 	const { timestamps, y, x } = await fetchHistoricalData(env.DB, symbol);
-	console.log(`[${symbol}] [forecast] [y]`, y);
 
 	const currentTimeframe = getCurrentTimeframe();
 	const cacheKey = `forecast:${symbol}`;
@@ -315,15 +313,6 @@ export async function makeForecast(
 		throw new Error('No recent forecast available');
 	}
 
-	// Try to get from cache first
-	const cached = await env.KV.get<NixtlaForecastResponse>(cacheKey, 'json');
-	if (cached) {
-		console.log(`Cache hit for ${cacheKey}`);
-		return cached;
-	}
-
-	console.log(`Cache miss for ${cacheKey}, making new forecast`);
-
 	// Make forecast request
 	const response = await fetch('https://api.nixtla.io/forecast', {
 		method: 'POST',
@@ -335,7 +324,7 @@ export async function makeForecast(
 		body: JSON.stringify({
 			model: 'timegpt-1',
 			freq: '5min',
-			fh,
+			fh: 24,
 			y,
 			x,
 			clean_ex_first: true
@@ -351,7 +340,7 @@ export async function makeForecast(
 	const forecast = (await response.json()) as NixtlaForecastResponse;
 
 	// Store both the current cache and last successful forecast
-	await Promise.all([
+	const kvPromises = [
 		env.KV.put(cacheKey, JSON.stringify(forecast), {
 			// Set TTL to expire at the end of current 5min interval
 			expirationTtl: Math.ceil((currentTimeframe.add(5, 'minute').valueOf() - Date.now()) / 1000)
@@ -360,9 +349,105 @@ export async function makeForecast(
 		env.KV.put(lastForecastKey, JSON.stringify(forecast), {
 			expirationTtl: 24 * 60 * 60
 		})
-	]);
+	];
 
+	// Store each forecasted value separately for historical tracking
+	forecast.timestamp.forEach((ts, index) => {
+		const forecastedTime = dayjs(ts);
+		const formattedTimestamp = forecastedTime.format('YYYY-MM-DD HH:mm');
+		const periodAhead = index + 1; // 1-based index for readability
+		const historicKey = `forecast:${symbol}:${formattedTimestamp}#${periodAhead}`;
+
+		// Calculate TTL as the time until this forecast's timestamp plus 5 minutes
+		const ttlSeconds = Math.ceil((forecastedTime.add(5, 'minute').valueOf() - Date.now()) / 1000);
+
+		kvPromises.push(
+			env.KV.put(historicKey, JSON.stringify(forecast.value[index]), {
+				// Keep forecast until 5 minutes after its predicted time
+				expirationTtl: ttlSeconds
+			})
+		);
+	});
+
+	await Promise.all(kvPromises);
+
+	console.log(`[${symbol}]`, '[forecast] Success:', forecast);
 	return forecast;
+}
+
+async function checkForecastAccuracy(
+	env: EnvBindings,
+	symbol: string,
+	actualClose: number,
+	timestamp: string
+) {
+	// List all forecasts for this timestamp
+	const forecastList = await env.KV.list({ prefix: `forecast:${symbol}:${timestamp}#` });
+
+	if (!forecastList.keys.length) {
+		console.log(`[${symbol}] [accuracy] No forecasts found for ${timestamp}`);
+		return;
+	}
+
+	console.log(
+		`[${symbol}] [accuracy] Checking ${forecastList.keys.length} forecasts for ${timestamp}`
+	);
+	console.log(`[${symbol}] [accuracy] Actual close: ${actualClose}`);
+
+	// Arrays to store errors for aggregate metrics
+	const errors: number[] = [];
+	const absErrors: number[] = [];
+	const percentErrors: number[] = [];
+	const predictions: number[] = [];
+
+	// Sort keys by period number
+	const sortedKeys = forecastList.keys.sort((a, b) => {
+		const periodA = parseInt(a.name.split('#')[1]);
+		const periodB = parseInt(b.name.split('#')[1]);
+		return periodA - periodB;
+	});
+
+	// Process each forecast
+	for (const key of sortedKeys) {
+		const periodAhead = parseInt(key.name.split('#')[1]);
+		const forecastValue = await env.KV.get<number>(key.name, 'json');
+
+		if (forecastValue !== null) {
+			const error = forecastValue - actualClose;
+			const absError = Math.abs(error);
+			const percentError = (error / actualClose) * 100;
+
+			errors.push(error);
+			absErrors.push(absError);
+			percentErrors.push(Math.abs(percentError)); // Use absolute values for MAPE
+			predictions.push(forecastValue);
+
+			console.log(
+				`[${symbol}] [accuracy] ${periodAhead} periods ahead:`,
+				`predicted=${forecastValue}`,
+				`error=${percentError.toFixed(4)}%`
+			);
+		}
+	}
+
+	if (errors.length > 0) {
+		// Calculate MAE (Mean Absolute Error)
+		const mae = absErrors.reduce((a, b) => a + b, 0) / absErrors.length;
+
+		// Calculate MAPE (Mean Absolute Percentage Error)
+		const mape = percentErrors.reduce((a, b) => a + b, 0) / percentErrors.length;
+
+		// Calculate R² Score
+		const meanActual = actualClose;
+		const ssRes = errors.reduce((a, b) => a + b * b, 0); // Sum of squares of residuals
+		const ssTot = predictions.reduce((a, b) => a + Math.pow(b - meanActual, 2), 0); // Total sum of squares
+		const rSquared = 1 - ssRes / ssTot;
+
+		console.log(`[${symbol}] [accuracy] Aggregate Metrics:`);
+		console.log(`[${symbol}] [accuracy] MAE: ${mae.toFixed(4)} (absolute error in price)`);
+		console.log(`[${symbol}] [accuracy] MAPE: ${mape.toFixed(4)}%`);
+		console.log(`[${symbol}] [accuracy] R² Score: ${rSquared.toFixed(4)}`);
+	}
 }
 
 export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
@@ -371,8 +456,9 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 	const currentTimeframe = Math.floor(minutes / 5) * 5;
 	const date = now.startOf('hour').add(currentTimeframe, 'minute');
 	const timestamp = date.valueOf();
+	const formattedTimestamp = date.format('YYYY-MM-DD HH:mm');
 
-	console.log('[date]', date.format('YYYY-MM-DD HH:mm'));
+	console.log('[date]', formattedTimestamp);
 
 	// Fetch depth
 	try {
@@ -423,6 +509,17 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 			match(item.id)
 				.with('candle', () => {
 					console.log(`[${symbol}]`, '[candle]', item.result);
+					// Check forecast accuracy with the actual close price
+					try {
+						checkForecastAccuracy(
+							env,
+							symbol,
+							(item.result as Indicators['candle']).close,
+							formattedTimestamp
+						);
+					} catch (error) {
+						console.error(`[${symbol}] [accuracy] Error checking forecast accuracy:`, error);
+					}
 					return storeDatapoint(env.DB, symbol, item.id, timestamp, item.result);
 				})
 				.with('vwap', () => {
@@ -453,10 +550,9 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 
 	// Make forecast after all indicators are fetched and stored
 	try {
+		await new Promise((resolve) => setTimeout(resolve, 10_000));
 		console.log(`[${symbol}]`, '[forecast] Making forecast...');
-		const forecast = await makeForecast(env, symbol);
-		console.log(`[${symbol}]`, '[forecast] Success:', forecast);
-		return forecast;
+		await makeForecast(env, symbol);
 	} catch (error) {
 		console.error('Error making forecast:', error);
 		throw error;

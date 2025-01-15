@@ -2,7 +2,7 @@ import dayjs from 'dayjs';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { makeForecast } from './taapi';
+import { NixtlaForecastResponse } from './taapi';
 import { EnvBindings } from './types';
 
 const app = new Hono<{ Bindings: EnvBindings }>();
@@ -239,11 +239,26 @@ app.get('/forecast/:symbol', async (c) => {
 	}
 
 	try {
-		const forecast = await makeForecast(c.env, symbol, 12); // Fixed 1-hour forecast (12 * 5min)
+		// Try to get the most recent forecast from cache
+		const cacheKey = `forecast:${symbol}`;
+		const lastForecastKey = `last_forecast:${symbol}`;
 
-		return c.json(forecast);
+		const cached = await c.env.KV.get<NixtlaForecastResponse>(cacheKey, 'json');
+		if (cached) {
+			console.log(`Cache hit for ${cacheKey}`);
+			return c.json(cached);
+		}
+
+		// If no cached forecast, try to get the last successful forecast
+		const lastForecast = await c.env.KV.get<NixtlaForecastResponse>(lastForecastKey, 'json');
+		if (lastForecast) {
+			console.log(`Using last available forecast for ${symbol}`);
+			return c.json(lastForecast);
+		}
+
+		return c.json({ error: 'No forecast data available yet' }, 404);
 	} catch (error) {
-		console.error('Error making forecast:', error);
+		console.error('Error getting forecast:', error);
 		return c.json({ error: 'Internal server error' }, 500);
 	}
 });

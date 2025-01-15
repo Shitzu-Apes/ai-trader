@@ -2,7 +2,8 @@ import dayjs from 'dayjs';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { NixtlaForecastResponse } from './taapi';
+import { NixtlaForecastResponse } from './forecast';
+import { Position } from './trading';
 import { EnvBindings } from './types';
 
 const app = new Hono<{ Bindings: EnvBindings }>();
@@ -259,6 +260,154 @@ app.get('/forecast/:symbol', async (c) => {
 		return c.json({ error: 'No forecast data available yet' }, 404);
 	} catch (error) {
 		console.error('Error getting forecast:', error);
+		return c.json({ error: 'Internal server error' }, 500);
+	}
+});
+
+// Get current USDC balance
+app.get('/balance', async (c) => {
+	try {
+		const balance = await c.env.KV.get<number>('balance:USDC', 'json');
+		return c.json({
+			balance: balance ?? 1000,
+			currency: 'USDC'
+		});
+	} catch (error) {
+		console.error('Error getting balance:', error);
+		return c.json({ error: 'Internal server error' }, 500);
+	}
+});
+
+// Get current position for a symbol
+app.get('/position/:symbol', async (c) => {
+	const symbol = c.req.param('symbol');
+
+	if (!symbolSchema.safeParse(symbol).success) {
+		return c.json({ error: 'Invalid symbol' }, 400);
+	}
+
+	try {
+		const position = await c.env.KV.get<Position>(`position:${symbol}`, 'json');
+		if (!position) {
+			return c.json({ error: 'No active position' }, 404);
+		}
+		return c.json(position);
+	} catch (error) {
+		console.error('Error getting position:', error);
+		return c.json({ error: 'Internal server error' }, 500);
+	}
+});
+
+// Get trading stats for a symbol
+app.get('/stats/:symbol', async (c) => {
+	const symbol = c.req.param('symbol');
+
+	if (!symbolSchema.safeParse(symbol).success) {
+		return c.json({ error: 'Invalid symbol' }, 400);
+	}
+
+	try {
+		const stats = await c.env.KV.get<{
+			cumulativePnl: number;
+			successfulTrades: number;
+			totalTrades: number;
+		}>(`stats:${symbol}`, 'json');
+
+		if (!stats) {
+			return c.json({
+				cumulativePnl: 0,
+				successfulTrades: 0,
+				totalTrades: 0,
+				winRate: 0
+			});
+		}
+
+		return c.json({
+			...stats,
+			winRate: stats.totalTrades > 0 ? stats.successfulTrades / stats.totalTrades : 0
+		});
+	} catch (error) {
+		console.error('Error getting stats:', error);
+		return c.json({ error: 'Internal server error' }, 500);
+	}
+});
+
+// Get all positions and stats
+app.get('/portfolio', async (c) => {
+	try {
+		// Get current balance
+		const balance = (await c.env.KV.get<number>('balance:USDC', 'json')) ?? 1000;
+
+		// Get all positions
+		const positions: Record<string, Position> = {};
+		const stats: Record<
+			string,
+			{
+				cumulativePnl: number;
+				successfulTrades: number;
+				totalTrades: number;
+				winRate: number;
+			}
+		> = {};
+
+		// Process each supported symbol
+		for (const symbol of symbolSchema.options) {
+			const position = await c.env.KV.get<Position>(`position:${symbol}`, 'json');
+			if (position) {
+				positions[symbol] = position;
+			}
+
+			const symbolStats = await c.env.KV.get<{
+				cumulativePnl: number;
+				successfulTrades: number;
+				totalTrades: number;
+			}>(`stats:${symbol}`, 'json');
+
+			if (symbolStats) {
+				stats[symbol] = {
+					...symbolStats,
+					winRate:
+						symbolStats.totalTrades > 0 ? symbolStats.successfulTrades / symbolStats.totalTrades : 0
+				};
+			} else {
+				stats[symbol] = {
+					cumulativePnl: 0,
+					successfulTrades: 0,
+					totalTrades: 0,
+					winRate: 0
+				};
+			}
+		}
+
+		return c.json({
+			balance,
+			positions,
+			stats
+		});
+	} catch (error) {
+		console.error('Error getting portfolio:', error);
+		return c.json({ error: 'Internal server error' }, 500);
+	}
+});
+
+// Delete all positions and reset balance (for testing)
+app.post('/reset', async (c) => {
+	try {
+		// Delete all positions and stats
+		for (const symbol of symbolSchema.options) {
+			await c.env.KV.delete(`position:${symbol}`);
+			await c.env.KV.delete(`stats:${symbol}`);
+		}
+
+		// Reset balance to initial value
+		await c.env.KV.put('balance:USDC', JSON.stringify(1000));
+
+		return c.json({
+			message: 'All positions deleted and balance reset',
+			initialBalance: 1000
+		});
+	} catch (error) {
+		console.error('Error resetting positions:', error);
 		return c.json({ error: 'Internal server error' }, 500);
 	}
 });

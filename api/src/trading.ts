@@ -41,7 +41,7 @@ async function calculateSwapOutcome(
 	symbol: string,
 	amountIn: number,
 	isBuy: boolean,
-	env: EnvBindings
+	_env: EnvBindings
 ): Promise<number> {
 	const tokens = symbolInfo[symbol as keyof typeof symbolInfo];
 	if (!tokens) {
@@ -58,13 +58,11 @@ async function calculateSwapOutcome(
 	const fixedAmount = new FixedNumber(BigInt(Math.floor(amountIn * 10 ** decimals)), decimals);
 
 	// Get expected return from REF
-	const expectedReturn = await Ref.getReturn({
-		poolId: tokens.poolId,
+	const expectedReturn = await Ref.getSmartRouterReturn({
 		tokenIn,
 		amountIn: fixedAmount,
 		tokenOut,
-		decimals: tokenInfo[tokenOut as keyof typeof tokenInfo].decimals,
-		env
+		decimals: tokenInfo[tokenOut as keyof typeof tokenInfo].decimals
 	});
 
 	return expectedReturn.toNumber();

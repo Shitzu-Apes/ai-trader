@@ -58,11 +58,13 @@ export async function viewWithNode<T>(
 
 		const result = new Uint8Array(json.result.result);
 		const decoder = new TextDecoder();
+		const decoded = decoder.decode(result);
 
 		try {
-			return JSON.parse(decoder.decode(result));
+			return JSON.parse(decoded);
 		} catch (error) {
 			console.error('[view]: Result Parse Error', error);
+			console.error('[view]: Result', decoded);
 			throw new Error('Failed to parse contract response');
 		}
 	} catch (error: unknown) {

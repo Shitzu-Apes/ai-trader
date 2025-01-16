@@ -149,8 +149,7 @@ export async function fetchHistoricalData(
 	y: Record<string, number>;
 	x: Record<string, number[]>;
 }> {
-	// Use 864 datapoints = last 3 days of 5min intervals
-	const HISTORY_LIMIT = 864; // 3 days * 24 hours * 12 intervals per hour
+	const HISTORY_LIMIT = 12 * 24 * 7; // 7 days * 24 hours * 12 intervals per hour
 
 	// Get the current 5min interval using the helper function
 	const currentTimeframe = getCurrentTimeframe();

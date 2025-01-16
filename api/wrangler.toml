@@ -11,6 +11,9 @@ enabled = true
 mode = "smart"
 
 [vars]
+NODE_URL = "https://rpc.shitzuapes.xyz"
+REF_CONTRACT_ID = "v2.ref-finance.near"
+ACCOUNT_ID = "aitrader.0xshitzu.near"
 
 [triggers]
 crons = ["*/5 * * * *"]

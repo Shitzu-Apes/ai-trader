@@ -9,4 +9,7 @@ export interface EnvBindings {
 	PROXY_USERNAME?: string;
 	PROXY_PASSWORD?: string;
 	BINANCE_API_URL: string;
+	NODE_URL: string;
+	REF_CONTRACT_ID: string;
+	ACCOUNT_ID: string;
 }

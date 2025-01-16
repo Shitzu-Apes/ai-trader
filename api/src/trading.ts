@@ -1,27 +1,80 @@
+import { FixedNumber } from './FixedNumber';
+import { Ref } from './ref';
 import { NixtlaForecastResponse } from './taapi';
 import { EnvBindings } from './types';
 
+// Symbol info for token addresses
+const symbolInfo = {
+	'NEAR/USDT': {
+		base: 'wrap.near',
+		quote: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+		poolId: 5515
+	}
+} as const;
+
+// Token decimals info
+const tokenInfo = {
+	'wrap.near': {
+		decimals: 24
+	},
+	'17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': {
+		decimals: 6
+	}
+} as const;
+
 // Trading algorithm configuration
 const TRADING_CONFIG = {
-	DECAY_ALPHA: 0.95, // Exponential decay factor for new positions
+	DECAY_ALPHA: 0.92, // Exponential decay factor for new positions
 	DECAY_ALPHA_EXISTING: 0.9, // More conservative decay factor for existing positions
-	UPPER_THRESHOLD: 0.0015, // +0.15% threshold for buying new positions
-	LOWER_THRESHOLD: -0.0015, // -0.15% threshold for selling new positions
-	UPPER_THRESHOLD_EXISTING: 0, // +0% threshold when position exists
-	LOWER_THRESHOLD_EXISTING: 0, // -0% threshold when position exists
-	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss threshold
-	INITIAL_BALANCE: 1000, // Initial USDC balance
-	TRADING_FEE: 0.0005 // 0.05% trading fee
+	UPPER_THRESHOLD: 0.002, // +0.2% threshold for buying new positions
+	LOWER_THRESHOLD: -0.002, // -0.2% threshold for selling new positions
+	UPPER_THRESHOLD_EXISTING: 0.0005, // +0.05% threshold when position exists
+	LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% threshold when position exists
+	STOP_LOSS_THRESHOLD: -0.005, // -0.5% stop loss threshold
+	INITIAL_BALANCE: 1000 // Initial USDC balance
 } as const;
+
+/**
+ * Calculate the expected swap outcome
+ */
+async function calculateSwapOutcome(
+	symbol: string,
+	amountIn: number,
+	isBuy: boolean,
+	env: EnvBindings
+): Promise<number> {
+	const tokens = symbolInfo[symbol as keyof typeof symbolInfo];
+	if (!tokens) {
+		throw new Error(`Unsupported symbol: ${symbol}`);
+	}
+
+	// For buys: quote -> base (USDT -> NEAR)
+	// For sells: base -> quote (NEAR -> USDT)
+	const tokenIn = isBuy ? tokens.quote : tokens.base;
+	const tokenOut = isBuy ? tokens.base : tokens.quote;
+	const decimals = tokenInfo[tokenIn as keyof typeof tokenInfo].decimals;
+
+	// Convert amount to FixedNumber with proper decimals
+	const fixedAmount = new FixedNumber(BigInt(Math.floor(amountIn * 10 ** decimals)), decimals);
+
+	// Get expected return from REF
+	const expectedReturn = await Ref.getReturn({
+		poolId: tokens.poolId,
+		tokenIn,
+		amountIn: fixedAmount,
+		tokenOut,
+		decimals: tokenInfo[tokenOut as keyof typeof tokenInfo].decimals,
+		env
+	});
+
+	return expectedReturn.toNumber();
+}
 
 export type Position = {
 	symbol: string;
 	size: number; // Position size in base currency (e.g., BTC)
 	entryPrice: number; // Average entry price
 	openedAt: number; // Timestamp when position was opened
-	unrealizedPnl: number; // Current unrealized profit/loss
-	realizedPnl: number; // Total realized profit/loss for this position
-	fees: number; // Total fees paid
 	lastUpdateTime: number; // Last time position was updated
 	cumulativePnl: number; // Total PnL including all closed positions
 	successfulTrades: number; // Count of profitable trades
@@ -52,13 +105,13 @@ export async function updatePosition(env: EnvBindings, position: Position): Prom
 export async function closePosition(
 	env: EnvBindings,
 	symbol: string,
-	currentPrice: number
+	expectedUsdcAmount: number
 ): Promise<void> {
 	const key = `position:${symbol}`;
 	const position = await getPosition(env, symbol);
 
 	if (position) {
-		const closingPnl = calculateUnrealizedPnl(position, currentPrice);
+		const closingPnl = expectedUsdcAmount - position.size * position.entryPrice;
 		position.cumulativePnl += closingPnl;
 		position.totalTrades += 1;
 		if (closingPnl > 0) {
@@ -67,15 +120,12 @@ export async function closePosition(
 
 		// Update USDC balance
 		const currentBalance = await getBalance(env);
-		const closingFees = calculateTradingFees(currentPrice, position.size);
-		// Add back the entire position value (not just PnL)
-		const newBalance = currentBalance + position.size * currentPrice - closingFees;
+		const newBalance = currentBalance + expectedUsdcAmount;
 
 		console.log(
 			`[${symbol}] [trade] Closing balance update:`,
 			`Current=${currentBalance}`,
-			`Position Value=${position.size * currentPrice}`,
-			`Fees=${closingFees}`,
+			`Expected USDC=${expectedUsdcAmount}`,
 			`New=${newBalance}`
 		);
 
@@ -96,24 +146,21 @@ export async function closePosition(
 	await env.KV.delete(key);
 }
 
-// Calculate unrealized PnL for a position
-export function calculateUnrealizedPnl(position: Position, currentPrice: number): number {
-	const priceDiff = currentPrice - position.entryPrice;
-	return position.size * priceDiff;
-}
-
 // Update position with current market data
-export async function updatePositionPnL(
-	env: EnvBindings,
-	symbol: string,
-	currentPrice: number
-): Promise<void> {
+export async function updatePositionPnL(env: EnvBindings, symbol: string): Promise<void> {
 	const position = await getPosition(env, symbol);
 	if (!position) return;
 
-	position.unrealizedPnl = calculateUnrealizedPnl(position, currentPrice);
-	position.lastUpdateTime = Date.now();
+	// Calculate expected USDC amount from the swap
+	const expectedUsdcAmount = await calculateSwapOutcome(symbol, position.size, false, env);
+	const unrealizedPnl = expectedUsdcAmount - position.size * position.entryPrice;
 
+	console.log(
+		`[${symbol}] [trade] Unrealized PnL: ${unrealizedPnl} USDC`,
+		`Expected USDC: ${expectedUsdcAmount}`
+	);
+
+	position.lastUpdateTime = Date.now();
 	await updatePosition(env, position);
 }
 
@@ -134,10 +181,28 @@ function getTimeDecayedAverage(predictions: number[], alpha: number): number {
 }
 
 /**
- * Calculate trading fees for a transaction
+ * Calculate actual price from swap amounts using FixedNumber
  */
-function calculateTradingFees(price: number, size: number): number {
-	return price * size * TRADING_CONFIG.TRADING_FEE;
+function calculateActualPrice(symbol: string, baseAmount: number, quoteAmount: number): number {
+	const tokens = symbolInfo[symbol as keyof typeof symbolInfo];
+	if (!tokens) {
+		throw new Error(`Unsupported symbol: ${symbol}`);
+	}
+
+	const baseDecimals = tokenInfo[tokens.base as keyof typeof tokenInfo].decimals;
+	const quoteDecimals = tokenInfo[tokens.quote as keyof typeof tokenInfo].decimals;
+
+	const fixedBase = new FixedNumber(
+		BigInt(Math.floor(baseAmount * 10 ** baseDecimals)),
+		baseDecimals
+	);
+	const fixedQuote = new FixedNumber(
+		BigInt(Math.floor(quoteAmount * 10 ** quoteDecimals)),
+		quoteDecimals
+	);
+
+	// Price = quote/base (USDT/NEAR)
+	return fixedQuote.div(fixedBase).toNumber();
 }
 
 /**
@@ -154,21 +219,39 @@ export async function analyzeForecast(
 	// Get current position if any
 	const currentPosition = await getPosition(env, symbol);
 
-	// Check stop loss first if we have a position
+	// Get actual price based on position
+	let actualPrice: number;
 	if (currentPosition) {
+		// If we have a position, price is based on selling the full position
+		const expectedUsdcAmount = await calculateSwapOutcome(symbol, currentPosition.size, false, env);
+		actualPrice = calculateActualPrice(symbol, currentPosition.size, expectedUsdcAmount);
+
+		// Check stop loss
 		const priceDiff = (currentPrice - currentPosition.entryPrice) / currentPosition.entryPrice;
 		if (priceDiff <= TRADING_CONFIG.STOP_LOSS_THRESHOLD) {
 			console.log(
 				`[${symbol}] [trade] Stop loss triggered:`,
 				`Entry=${currentPosition.entryPrice}`,
 				`Current=${currentPrice}`,
+				`Actual=${actualPrice}`,
 				`Diff=${(priceDiff * 100).toFixed(4)}%`
 			);
-			const closingPnl = calculateUnrealizedPnl(currentPosition, currentPrice);
-			const finalPnl = currentPosition.realizedPnl + closingPnl;
+			const closingPnl = expectedUsdcAmount - currentPosition.size * currentPosition.entryPrice;
+			const finalPnl = closingPnl;
 			console.log(`[${symbol}] [trade] Final PnL: ${finalPnl} USDC`);
-			await closePosition(env, symbol, currentPrice);
+
+			await closePosition(env, symbol, expectedUsdcAmount);
 			return;
+		}
+	} else {
+		// If we have no position, price is based on buying a full position
+		const balance = await getBalance(env);
+		if (balance <= 0) {
+			console.log(`[${symbol}] [trade] Insufficient balance: ${balance} USDC, using current price`);
+			actualPrice = currentPrice;
+		} else {
+			const expectedNearAmount = await calculateSwapOutcome(symbol, balance, true, env);
+			actualPrice = calculateActualPrice(symbol, expectedNearAmount, balance);
 		}
 	}
 
@@ -189,12 +272,13 @@ export async function analyzeForecast(
 	// Calculate time-decayed average of predicted prices
 	const decayedAvgPrice = getTimeDecayedAverage(shortTermForecast, decayAlpha);
 
-	// Calculate percentage difference
+	// Calculate percentage difference using actual price
 	const diffPct = (decayedAvgPrice - currentPrice) / currentPrice;
 
 	console.log(
 		`[${symbol}] [trade] Analysis:`,
 		`Current=${currentPrice}`,
+		`Actual=${actualPrice}`,
 		`DecayedAvg=${decayedAvgPrice}`,
 		`Diff=${(diffPct * 100).toFixed(4)}%`,
 		`Using ${shortTermForecast.length} forecast points`,
@@ -222,8 +306,9 @@ export async function analyzeForecast(
 				return;
 			}
 
-			// Calculate position size in base currency
-			const size = balance / currentPrice;
+			// Calculate expected NEAR amount from the swap
+			const expectedNearAmount = await calculateSwapOutcome(symbol, balance, true, env);
+			const size = expectedNearAmount;
 
 			// Get previous trading stats
 			const statsKey = `stats:${symbol}`;
@@ -238,11 +323,8 @@ export async function analyzeForecast(
 			const newPosition: Position = {
 				symbol,
 				size,
-				entryPrice: currentPrice,
+				entryPrice: actualPrice,
 				openedAt: Date.now(),
-				unrealizedPnl: 0,
-				realizedPnl: 0,
-				fees: calculateTradingFees(currentPrice, size),
 				lastUpdateTime: Date.now(),
 				cumulativePnl: stats?.cumulativePnl ?? 0,
 				successfulTrades: stats?.successfulTrades ?? 0,
@@ -250,33 +332,42 @@ export async function analyzeForecast(
 			};
 
 			// Update USDC balance
-			const newBalance = balance - size * currentPrice - newPosition.fees;
+			const newBalance = 0; // All USDC is used for the swap
 			await updateBalance(env, newBalance);
 
 			console.log(
-				`[${symbol}] [trade] Position size: ${size} (${size * currentPrice} USDC), Balance: ${newBalance} USDC`
+				`[${symbol}] [trade] Position size: ${size} ${symbolInfo[symbol as keyof typeof symbolInfo].base} (${size * actualPrice} USDC), Balance: ${newBalance} USDC`
 			);
 			await updatePosition(env, newPosition);
 		} else {
 			console.log(`[${symbol}] [trade] Holding position`);
-			await updatePositionPnL(env, symbol, currentPrice);
 		}
 	} else if (signal === 'sell') {
 		if (currentPosition) {
+			// Calculate expected USDC amount from the swap
+			const expectedUsdcAmount = await calculateSwapOutcome(
+				symbol,
+				currentPosition.size,
+				false,
+				env
+			);
+
 			// Close position
 			console.log(`[${symbol}] [trade] Closing position`);
-			const closingPnl = calculateUnrealizedPnl(currentPosition, currentPrice);
-			const finalPnl = currentPosition.realizedPnl + closingPnl;
-			console.log(`[${symbol}] [trade] Final PnL: ${finalPnl} USDC`);
-			await closePosition(env, symbol, currentPrice);
+			const closingPnl = expectedUsdcAmount - currentPosition.size * currentPosition.entryPrice;
+			const finalPnl = closingPnl;
+			console.log(
+				`[${symbol}] [trade] Final PnL: ${finalPnl} USDC`,
+				`Expected USDC: ${expectedUsdcAmount}`
+			);
+			await closePosition(env, symbol, expectedUsdcAmount);
 		} else {
 			console.log(`[${symbol}] [trade] No position to close`);
 		}
 	} else {
-		// Hold signal - update PnL if we have a position
+		// Hold signal - no need to update PnL since it will be calculated from actual prices
 		if (currentPosition) {
 			console.log(`[${symbol}] [trade] Holding position`);
-			await updatePositionPnL(env, symbol, currentPrice);
 		} else {
 			console.log(`[${symbol}] [trade] No position to hold`);
 		}

@@ -227,10 +227,10 @@ function calculateTaSignal({
 	let score = 0;
 
 	// VWAP signals
-	if (vwap < currentPrice) score += 1;
-	if (vwap * 1.01 < currentPrice) score += 1;
-	if (vwap > currentPrice) score -= 1;
-	if (vwap * 0.99 > currentPrice) score -= 1;
+	if (vwap > 1.005 * currentPrice) score += 1;
+	if (vwap * 1.01 > currentPrice) score += 1;
+	if (vwap < 0.995 * currentPrice) score -= 1;
+	if (vwap * 0.99 < currentPrice) score -= 1;
 
 	// Bollinger Bands signals
 	if (currentPrice < bbandsLower) score += 1;

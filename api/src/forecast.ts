@@ -16,9 +16,17 @@ export type NixtlaForecastResponse = {
 export async function makeForecast(
 	env: EnvBindings,
 	symbol: string
-): Promise<NixtlaForecastResponse> {
+): Promise<{
+	forecast: NixtlaForecastResponse;
+	vwap: number;
+	bbandsUpper: number;
+	bbandsLower: number;
+	rsi: number;
+	obvDelta: number;
+}> {
 	// Get historical data
-	const { timestamps, y, x } = await fetchHistoricalData(env.DB, symbol);
+	const { timestamps, y, x, vwap, bbandsUpper, bbandsLower, rsi, obvDelta } =
+		await fetchHistoricalData(env.DB, symbol);
 
 	const currentTimeframe = getCurrentTimeframe();
 	const cacheKey = `forecast:${symbol}`;
@@ -29,7 +37,7 @@ export async function makeForecast(
 		console.log(`Data fetch is still pending for ${symbol}, returning last forecast`);
 		const lastForecast = await env.KV.get<NixtlaForecastResponse>(lastForecastKey, 'json');
 		if (lastForecast) {
-			return lastForecast;
+			return { forecast: lastForecast, vwap, bbandsUpper, bbandsLower, rsi, obvDelta };
 		}
 		throw new Error('No recent forecast available');
 	}
@@ -93,7 +101,7 @@ export async function makeForecast(
 	await Promise.all(kvPromises);
 
 	console.log(`[${symbol}]`, '[forecast] Success:', forecast);
-	return forecast;
+	return { forecast, vwap, bbandsUpper, bbandsLower, rsi, obvDelta };
 }
 
 export async function checkForecastAccuracy(

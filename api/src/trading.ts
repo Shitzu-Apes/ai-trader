@@ -26,10 +26,10 @@ const tokenInfo = {
 const TRADING_CONFIG = {
 	DECAY_ALPHA: 0.92, // Exponential decay factor for new positions
 	DECAY_ALPHA_EXISTING: 0.9, // More conservative decay factor for existing positions
-	UPPER_THRESHOLD: 0.0025, // +0.25% threshold for buying new positions
-	LOWER_THRESHOLD: -0.0025, // -0.25% threshold for selling new positions
-	UPPER_THRESHOLD_EXISTING: 0.001, // +0.1% threshold when position exists
-	LOWER_THRESHOLD_EXISTING: -0.001, // -0.1% threshold when position exists
+	UPPER_THRESHOLD: 0.002, // +0.2% threshold for buying new positions
+	LOWER_THRESHOLD: -0.002, // -0.2% threshold for selling new positions
+	UPPER_THRESHOLD_EXISTING: 0.0005, // +0.05% threshold when position exists
+	LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% threshold when position exists
 	STOP_LOSS_THRESHOLD: -0.005, // -0.5% stop loss threshold
 	INITIAL_BALANCE: 1000 // Initial USDC balance
 } as const;
@@ -204,13 +204,79 @@ function calculateActualPrice(symbol: string, baseAmount: number, quoteAmount: n
 }
 
 /**
+ * Calculate signal based on technical indicators
+ */
+function calculateTaSignal({
+	symbol,
+	currentPrice,
+	vwap,
+	bbandsUpper,
+	bbandsLower,
+	rsi,
+	obvDelta
+}: {
+	symbol: string;
+	currentPrice: number;
+	vwap: number;
+	bbandsUpper: number;
+	bbandsLower: number;
+	rsi: number;
+	obvDelta: number;
+}): 'buy' | 'sell' | 'hold' {
+	let score = 0;
+
+	// VWAP signals
+	if (vwap < currentPrice) score += 1;
+	if (vwap * 1.01 < currentPrice) score += 1;
+	if (vwap > currentPrice) score -= 1;
+	if (vwap * 0.99 > currentPrice) score -= 1;
+
+	// Bollinger Bands signals
+	if (currentPrice < bbandsLower) score += 1;
+	if (currentPrice < bbandsLower * 0.995) score += 1;
+	if (currentPrice > bbandsUpper) score -= 1;
+	if (currentPrice > bbandsUpper * 1.005) score -= 1;
+
+	// RSI signals
+	if (rsi < 40) score += 1;
+	if (rsi < 25) score += 1;
+	if (rsi > 60) score -= 1;
+	if (rsi > 75) score -= 1;
+
+	// OBV signals
+	const obvDeltaSqrt = obvDelta > 0 ? Math.sqrt(obvDelta) : -Math.sqrt(-obvDelta);
+	if (obvDeltaSqrt > 150) score += 1;
+	if (obvDeltaSqrt > 300) score += 1;
+	if (obvDeltaSqrt < -150) score -= 1;
+	if (obvDeltaSqrt < -300) score -= 1;
+
+	console.log(
+		`[${symbol}] [trade] Technical Analysis Score:`,
+		`Score=${score}`,
+		`VWAP=${vwap}`,
+		`BBands=${bbandsLower}/${bbandsUpper}`,
+		`RSI=${rsi}`,
+		`OBV Delta=${obvDeltaSqrt}`
+	);
+
+	if (score > 2) return 'buy';
+	if (score < -1) return 'sell';
+	return 'hold';
+}
+
+/**
  * Analyze forecast and decide trading action
  */
 export async function analyzeForecast(
 	env: EnvBindings,
 	symbol: string,
 	currentPrice: number,
-	forecast: NixtlaForecastResponse
+	forecast: NixtlaForecastResponse,
+	vwap: number,
+	bbandsUpper: number,
+	bbandsLower: number,
+	rsi: number,
+	obvDelta: number
 ): Promise<void> {
 	console.log(`[${symbol}] [trade] Analyzing forecast...`);
 
@@ -291,6 +357,25 @@ export async function analyzeForecast(
 	} else if (diffPct < lowerThreshold) {
 		signal = 'sell';
 	} else {
+		signal = 'hold';
+	}
+
+	// Calculate TA signal
+	const taSignal = calculateTaSignal({
+		symbol,
+		currentPrice,
+		vwap,
+		bbandsUpper,
+		bbandsLower,
+		rsi,
+		obvDelta
+	});
+
+	console.log(`[${symbol}] [trade] Signals:`, `AI=${signal}`, `TA=${taSignal}`);
+
+	// Only proceed if both signals match and are not hold
+	if (signal === 'hold' || taSignal === 'hold' || signal !== taSignal) {
+		console.log(`[${symbol}] [trade] Signals don't match or indicate hold, holding position`);
 		signal = 'hold';
 	}
 

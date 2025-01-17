@@ -141,14 +141,7 @@ async function storeDatapoint(
 	await stmt.bind(symbol, indicator, timestamp, JSON.stringify(data)).run();
 }
 
-export async function fetchHistoricalData(
-	db: D1Database,
-	symbol: string
-): Promise<{
-	timestamps: string[];
-	y: Record<string, number>;
-	x: Record<string, number[]>;
-}> {
+export async function fetchHistoricalData(db: D1Database, symbol: string) {
 	const HISTORY_LIMIT = 12 * 24 * 7; // 7 days * 24 hours * 12 intervals per hour
 
 	// Get the current 5min interval using the helper function
@@ -251,6 +244,11 @@ export async function fetchHistoricalData(
 
 	// Collect data only from complete timestamps
 	let lastObv = 0;
+	let vwap = 0;
+	let bbandsUpper = 0;
+	let bbandsLower = 0;
+	let rsi = 0;
+	let obvDelta = 0;
 	timestamps.forEach((ts, i) => {
 		const data = groupedData.get(completeTimestamps[i])!;
 
@@ -258,6 +256,11 @@ export async function fetchHistoricalData(
 		y[ts] = data.candle.close;
 
 		// Exogenous variables (x)
+		vwap = data.vwap.value;
+		bbandsUpper = data.bbands.valueUpperBand;
+		bbandsLower = data.bbands.valueLowerBand;
+		rsi = data.rsi.value;
+		obvDelta = data.obv.value - lastObv;
 		x[ts] = [
 			data.candle.open,
 			data.candle.high,
@@ -269,14 +272,14 @@ export async function fetchHistoricalData(
 			data.bbands.valueMiddleBand,
 			data.bbands.valueLowerBand,
 			data.rsi.value,
-			data.obv.value - lastObv,
+			obvDelta,
 			data.depth.bid_size,
 			data.depth.ask_size
 		];
 		lastObv = data.obv.value;
 	});
 
-	return { timestamps, y, x };
+	return { timestamps, y, x, vwap, bbandsUpper, bbandsLower, rsi, obvDelta };
 }
 
 export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
@@ -381,7 +384,10 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 	try {
 		await new Promise((resolve) => setTimeout(resolve, 10_000));
 		console.log(`[${symbol}]`, '[forecast] Making forecast...');
-		const forecast = await makeForecast(env, symbol);
+		const { forecast, vwap, bbandsUpper, bbandsLower, rsi, obvDelta } = await makeForecast(
+			env,
+			symbol
+		);
 
 		// Get current price from candle data
 		const candleData = bulkData.find((d) => d.id === 'candle');
@@ -394,7 +400,17 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 		}
 
 		// Analyze forecast and potentially open/close positions
-		await analyzeForecast(env, symbol, currentPrice, forecast);
+		await analyzeForecast(
+			env,
+			symbol,
+			currentPrice,
+			forecast,
+			vwap,
+			bbandsUpper,
+			bbandsLower,
+			rsi,
+			obvDelta
+		);
 	} catch (error) {
 		console.error('Error making forecast:', error);
 		throw error;

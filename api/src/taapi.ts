@@ -227,15 +227,7 @@ export async function fetchHistoricalData(
 				data.rsi.value,
 				data.obv.value,
 				data.depth.bid_size,
-				data.depth.ask_size,
-				data.depth.bid_levels,
-				data.depth.ask_levels,
-				data.liq_zones.long_size,
-				data.liq_zones.short_size,
-				data.liq_zones.long_accounts,
-				data.liq_zones.short_accounts,
-				data.liq_zones.avg_long_price,
-				data.liq_zones.avg_short_price
+				data.depth.ask_size
 			];
 
 			// Check for any invalid values
@@ -258,6 +250,7 @@ export async function fetchHistoricalData(
 	const x: Record<string, number[]> = {};
 
 	// Collect data only from complete timestamps
+	let lastObv = 0;
 	timestamps.forEach((ts, i) => {
 		const data = groupedData.get(completeTimestamps[i])!;
 
@@ -276,18 +269,11 @@ export async function fetchHistoricalData(
 			data.bbands.valueMiddleBand,
 			data.bbands.valueLowerBand,
 			data.rsi.value,
-			data.obv.value,
+			data.obv.value - lastObv,
 			data.depth.bid_size,
-			data.depth.ask_size,
-			data.depth.bid_levels,
-			data.depth.ask_levels,
-			data.liq_zones.long_size,
-			data.liq_zones.short_size,
-			data.liq_zones.long_accounts,
-			data.liq_zones.short_accounts,
-			data.liq_zones.avg_long_price,
-			data.liq_zones.avg_short_price
+			data.depth.ask_size
 		];
+		lastObv = data.obv.value;
 	});
 
 	return { timestamps, y, x };

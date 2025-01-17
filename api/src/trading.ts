@@ -26,10 +26,10 @@ const tokenInfo = {
 const TRADING_CONFIG = {
 	DECAY_ALPHA: 0.92, // Exponential decay factor for new positions
 	DECAY_ALPHA_EXISTING: 0.9, // More conservative decay factor for existing positions
-	UPPER_THRESHOLD: 0.002, // +0.2% threshold for buying new positions
-	LOWER_THRESHOLD: -0.002, // -0.2% threshold for selling new positions
-	UPPER_THRESHOLD_EXISTING: 0.0005, // +0.05% threshold when position exists
-	LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% threshold when position exists
+	UPPER_THRESHOLD: 0.0025, // +0.25% threshold for buying new positions
+	LOWER_THRESHOLD: -0.0025, // -0.25% threshold for selling new positions
+	UPPER_THRESHOLD_EXISTING: 0.001, // +0.1% threshold when position exists
+	LOWER_THRESHOLD_EXISTING: -0.001, // -0.1% threshold when position exists
 	STOP_LOSS_THRESHOLD: -0.005, // -0.5% stop loss threshold
 	INITIAL_BALANCE: 1000 // Initial USDC balance
 } as const;

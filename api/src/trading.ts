@@ -31,6 +31,7 @@ const TRADING_CONFIG = {
 	UPPER_THRESHOLD_EXISTING: 0.0005, // +0.05% threshold when position exists
 	LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% threshold when position exists
 	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss threshold
+	TAKE_PROFIT_THRESHOLD: 0.05, // +5% take profit threshold
 	INITIAL_BALANCE: 1000 // Initial USDC balance
 } as const;
 
@@ -288,11 +289,14 @@ export async function analyzeForecast(
 		const expectedUsdcAmount = await calculateSwapOutcome(symbol, currentPosition.size, false, env);
 		actualPrice = calculateActualPrice(symbol, currentPosition.size, expectedUsdcAmount);
 
-		// Check stop loss
+		// Check stop loss and take profit
 		const priceDiff = (currentPrice - currentPosition.entryPrice) / currentPosition.entryPrice;
-		if (priceDiff <= TRADING_CONFIG.STOP_LOSS_THRESHOLD) {
+		if (
+			priceDiff <= TRADING_CONFIG.STOP_LOSS_THRESHOLD ||
+			priceDiff >= TRADING_CONFIG.TAKE_PROFIT_THRESHOLD
+		) {
 			console.log(
-				`[${symbol}] [trade] Stop loss triggered:`,
+				`[${symbol}] [trade] ${priceDiff <= TRADING_CONFIG.STOP_LOSS_THRESHOLD ? 'Stop loss' : 'Take profit'} triggered:`,
 				`Entry=${currentPosition.entryPrice}`,
 				`Current=${currentPrice}`,
 				`Actual=${actualPrice}`,

@@ -45,7 +45,7 @@ The bot combines several components to make trading decisions:
    **Trading Decision:**
    - Only executes trades when both signals agree (both buy or both sell)
    - Uses REF Finance Smart Router API for best swap prices
-   - Implements stop loss protection
+   - Implements stop loss and take profit thresholds
    - All positions are unidirectional (no shorts)
 
 4. **Position Management**
@@ -68,6 +68,7 @@ const TRADING_CONFIG = {
     UPPER_THRESHOLD_EXISTING: 0.0005, // +0.05% when position exists
     LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% when position exists
     STOP_LOSS_THRESHOLD: -0.02,     // -2% stop loss
+    TAKE_PROFIT_THRESHOLD: 0.05,    // +5% take profit
     INITIAL_BALANCE: 1000           // Starting USDC balance
 }
 ```

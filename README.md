@@ -24,13 +24,29 @@ The bot combines several components to make trading decisions:
 2. **Price Prediction**
    - Uses TimeGPT to forecast next 24 5-minute price points
    - Applies time-decay weighting to prioritize near-term predictions
-   - Considers both price predictions and technical indicators
+   - Uses fine-tuning with MAE loss for better accuracy
 
 3. **Trading Strategy**
-   - Compares weighted forecast vs current market price
+   The bot uses a dual-signal approach, combining AI predictions with technical analysis:
+
+   **AI Signal:**
+   - Applies time-decay weighting to short-term predictions
    - Uses tighter thresholds when position is open
-   - Implements stop-loss protection
-   - Uses actual DEX prices for trade execution
+   - Generates buy/sell/hold signal based on weighted forecast vs current price
+
+   **Technical Analysis Signal:**
+   - Calculates a score based on multiple indicators:
+     - VWAP crossovers and divergence
+     - Bollinger Bands breakouts
+     - RSI oversold/overbought levels
+     - OBV momentum (using square root scaling)
+   - Generates buy/sell/hold signal based on final score
+
+   **Trading Decision:**
+   - Only executes trades when both signals agree (both buy or both sell)
+   - Uses REF Finance Smart Router API for best swap prices
+   - Implements stop loss protection
+   - All positions are unidirectional (no shorts)
 
 4. **Position Management**
    - Paper trading with simulated USDC balance
@@ -51,7 +67,7 @@ const TRADING_CONFIG = {
     LOWER_THRESHOLD: -0.002,        // -0.2% threshold for selling
     UPPER_THRESHOLD_EXISTING: 0.0005, // +0.05% when position exists
     LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% when position exists
-    STOP_LOSS_THRESHOLD: -0.005,    // -0.5% stop loss
+    STOP_LOSS_THRESHOLD: -0.02,     // -2% stop loss
     INITIAL_BALANCE: 1000           // Starting USDC balance
 }
 ```
@@ -96,7 +112,8 @@ wrangler deploy
 The bot logs detailed information about:
 
 - Data collection status
-- Forecast accuracy metrics
+- Forecast accuracy metrics (MAE, MAPE, R²)
+- Technical analysis scores
 - Trade decisions and reasoning
 - Position updates and PnL
 - Error conditions and recovery
@@ -107,7 +124,7 @@ Currently supports NEAR/USDT on REF Finance with the following features:
 
 - Real-time price data via Binance API proxy
 - Full orderbook depth
-- Accurate swap pricing
+- Smart Router API for best swap prices
 - Position tracking
 
 ## Development
@@ -125,6 +142,7 @@ To run locally:
 - Uses a separate Binance API proxy service since Cloudflare Workers IP ranges are blocked by Binance
 - Trading decisions use current market price for signals but actual DEX prices for execution
 - All state is maintained in Cloudflare KV for serverless operation
+- Uses REF Finance Smart Router API with fallback to single pool for best prices
 
 ## Contributing
 

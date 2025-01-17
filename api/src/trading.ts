@@ -30,7 +30,7 @@ const TRADING_CONFIG = {
 	LOWER_THRESHOLD: -0.002, // -0.2% threshold for selling new positions
 	UPPER_THRESHOLD_EXISTING: 0.0005, // +0.05% threshold when position exists
 	LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% threshold when position exists
-	STOP_LOSS_THRESHOLD: -0.005, // -0.5% stop loss threshold
+	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss threshold
 	INITIAL_BALANCE: 1000 // Initial USDC balance
 } as const;
 
@@ -278,8 +278,6 @@ export async function analyzeForecast(
 	rsi: number,
 	obvDelta: number
 ): Promise<void> {
-	console.log(`[${symbol}] [trade] Analyzing forecast...`);
-
 	// Get current position if any
 	const currentPosition = await getPosition(env, symbol);
 
@@ -375,7 +373,6 @@ export async function analyzeForecast(
 
 	// Only proceed if both signals match and are not hold
 	if (signal === 'hold' || taSignal === 'hold' || signal !== taSignal) {
-		console.log(`[${symbol}] [trade] Signals don't match or indicate hold, holding position`);
 		signal = 'hold';
 	}
 

@@ -56,7 +56,9 @@ export async function makeForecast(
 			fh: 24,
 			y,
 			x,
-			clean_ex_first: true
+			clean_ex_first: true,
+			finetune_steps: 20,
+			finetune_loss: 'mae'
 		})
 	});
 

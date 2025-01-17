@@ -31,7 +31,7 @@ const TRADING_CONFIG = {
 	UPPER_THRESHOLD_EXISTING: 0.0005, // +0.05% threshold when position exists
 	LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% threshold when position exists
 	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss threshold
-	TAKE_PROFIT_THRESHOLD: 0.05, // +5% take profit threshold
+	TAKE_PROFIT_THRESHOLD: 0.03, // +3% take profit threshold
 	INITIAL_BALANCE: 1000 // Initial USDC balance
 } as const;
 

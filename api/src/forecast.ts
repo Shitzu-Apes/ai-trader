@@ -22,12 +22,11 @@ export async function makeForecast(
 	bbandsUpper: number;
 	bbandsLower: number;
 	rsi: number;
-	obvDelta: number;
 	prices: number[];
 	obvs: number[];
 }> {
 	// Get historical data
-	const { timestamps, y, x, vwap, bbandsUpper, bbandsLower, rsi, obvDelta, prices, obvs } =
+	const { timestamps, y, x, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs } =
 		await fetchHistoricalData(env.DB, symbol);
 
 	const currentTimeframe = getCurrentTimeframe();
@@ -45,7 +44,6 @@ export async function makeForecast(
 				bbandsUpper,
 				bbandsLower,
 				rsi,
-				obvDelta,
 				prices,
 				obvs
 			};
@@ -114,7 +112,7 @@ export async function makeForecast(
 	await Promise.all(kvPromises);
 
 	console.log(`[${symbol}]`, '[forecast] Success:', forecast);
-	return { forecast, vwap, bbandsUpper, bbandsLower, rsi, obvDelta, prices, obvs };
+	return { forecast, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs };
 }
 
 export async function checkForecastAccuracy(

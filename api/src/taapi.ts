@@ -285,7 +285,7 @@ export async function fetchHistoricalData(db: D1Database, symbol: string) {
 		lastObv = data.obv.value;
 	});
 
-	return { timestamps, y, x, vwap, bbandsUpper, bbandsLower, rsi, obvDelta, prices, obvs };
+	return { timestamps, y, x, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs };
 }
 
 export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
@@ -389,8 +389,10 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 	// Make forecast after all indicators are fetched and stored
 	try {
 		await new Promise((resolve) => setTimeout(resolve, 10_000));
-		const { forecast, vwap, bbandsUpper, bbandsLower, rsi, obvDelta, prices, obvs } =
-			await makeForecast(env, symbol);
+		const { forecast, vwap, bbandsUpper, bbandsLower, rsi, prices, obvs } = await makeForecast(
+			env,
+			symbol
+		);
 
 		// Get current price from candle data
 		const candleData = bulkData.find((d) => d.id === 'candle');
@@ -412,7 +414,6 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 			bbandsUpper,
 			bbandsLower,
 			rsi,
-			obvDelta,
 			prices,
 			obvs
 		);

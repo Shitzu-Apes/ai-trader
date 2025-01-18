@@ -34,7 +34,23 @@ const TRADING_CONFIG = {
 	TAKE_PROFIT_THRESHOLD: 0.03, // +3% take profit threshold
 	INITIAL_BALANCE: 1000, // Initial USDC balance
 	OBV_WINDOW_SIZE: 12, // 1 hour window for slope calculation
-	SLOPE_THRESHOLD: 0.1 // Minimum slope difference to consider divergence
+	SLOPE_THRESHOLD: 0.1, // Minimum slope difference to consider divergence
+
+	// AI score multipliers
+	AI_SCORE_MULTIPLIER: 1800, // Multiplier for new positions (1% difference = score of 1)
+	AI_SCORE_MULTIPLIER_EXISTING: 1500, // More conservative multiplier for existing positions
+
+	// TA score multipliers
+	VWAP_SCORE: 1, // Base score for VWAP signals
+	VWAP_EXTRA_SCORE: 1, // Additional score for stronger VWAP signals
+	BBANDS_MULTIPLIER: 1.5, // Bollinger Bands score multiplier
+	RSI_MULTIPLIER: 2, // RSI score multiplier
+	OBV_DIVERGENCE_MULTIPLIER: 1, // OBV divergence score multiplier
+	PROFIT_SCORE_MULTIPLIER: 1, // Profit-taking score multiplier (per 1% in profit)
+
+	// Score thresholds for trading decisions
+	TOTAL_SCORE_BUY_THRESHOLD: 5, // Score above which to buy
+	TOTAL_SCORE_SELL_THRESHOLD: -3.5 // Score below which to sell
 } as const;
 
 /**
@@ -150,15 +166,10 @@ function calculateRsiScore(rsi: number): number {
  * - Zero: Price in the middle
  */
 function calculateBBandsScore(currentPrice: number, upperBand: number, lowerBand: number): number {
-	// Calculate the middle band
 	const middleBand = (upperBand + lowerBand) / 2;
-
-	// Calculate where price is in the band range
 	const totalRange = upperBand - lowerBand;
 	const pricePosition = (currentPrice - middleBand) / (totalRange / 2);
-
-	// Return score between -1.5 and 1.5
-	return -pricePosition * 1.5;
+	return -pricePosition * TRADING_CONFIG.BBANDS_MULTIPLIER;
 }
 
 /**
@@ -168,13 +179,16 @@ function calculateBBandsScore(currentPrice: number, upperBand: number, lowerBand
  */
 function calculateProfitScore(currentPrice: number, entryPrice: number | null): number {
 	if (!entryPrice) return 0;
-
 	const priceDiff = (currentPrice - entryPrice) / entryPrice;
-	return priceDiff > 0 ? -priceDiff : 0; // -1 for each 1% in profit
+	return priceDiff > 0 ? -priceDiff * TRADING_CONFIG.PROFIT_SCORE_MULTIPLIER : 0;
 }
 
 /**
  * Calculate signal based on technical indicators
+ * Returns a score where:
+ * Positive: Bullish
+ * Negative: Bearish
+ * Magnitude indicates strength
  */
 function calculateTaSignal({
 	symbol,
@@ -196,21 +210,21 @@ function calculateTaSignal({
 	prices: number[];
 	obvs: number[];
 	entryPrice: number | null;
-}): 'buy' | 'sell' | 'hold' {
+}): number {
 	let score = 0;
 
 	// VWAP signals
-	if (vwap > 1.005 * currentPrice) score += 1;
-	if (vwap * 1.01 > currentPrice) score += 1;
-	if (vwap < 0.995 * currentPrice) score -= 1;
-	if (vwap * 0.99 < currentPrice) score -= 1;
+	if (vwap > 1.005 * currentPrice) score += TRADING_CONFIG.VWAP_SCORE;
+	if (vwap * 1.01 > currentPrice) score += TRADING_CONFIG.VWAP_EXTRA_SCORE;
+	if (vwap < 0.995 * currentPrice) score -= TRADING_CONFIG.VWAP_SCORE;
+	if (vwap * 0.99 < currentPrice) score -= TRADING_CONFIG.VWAP_EXTRA_SCORE;
 
-	// Dynamic Bollinger Bands score (-1.5 to +1.5 range)
+	// Dynamic Bollinger Bands score
 	const bbandsScore = calculateBBandsScore(currentPrice, bbandsUpper, bbandsLower);
 	score += bbandsScore;
 
-	// Dynamic RSI score (-2 to +2 range)
-	const rsiScore = calculateRsiScore(rsi) * 2;
+	// Dynamic RSI score
+	const rsiScore = calculateRsiScore(rsi) * TRADING_CONFIG.RSI_MULTIPLIER;
 	score -= rsiScore; // Subtract because negative score means buy
 
 	// Calculate slopes for both price and OBV
@@ -224,11 +238,12 @@ function calculateTaSignal({
 	const normalizedObvSlope = (obvSlope / maxObv) * 1000;
 
 	// Calculate divergence score
-	const divergenceScore = detectSlopeDivergence(
-		normalizedPriceSlope,
-		normalizedObvSlope,
-		TRADING_CONFIG.SLOPE_THRESHOLD
-	);
+	const divergenceScore =
+		detectSlopeDivergence(
+			normalizedPriceSlope,
+			normalizedObvSlope,
+			TRADING_CONFIG.SLOPE_THRESHOLD
+		) * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER;
 	score += divergenceScore;
 
 	// Add profit-taking bias
@@ -245,9 +260,7 @@ function calculateTaSignal({
 		`Profit Score=${profitScore.toFixed(4)}`
 	);
 
-	if (score > 3) return 'buy';
-	if (score < -2) return 'sell';
-	return 'hold';
+	return score;
 }
 
 export type Position = {
@@ -386,6 +399,18 @@ function calculateActualPrice(symbol: string, baseAmount: number, quoteAmount: n
 }
 
 /**
+ * Calculate AI score based on forecasted price difference
+ * Multiply by 100 to make it comparable to other scores
+ * e.g., 1% difference = score of 1
+ */
+function calculateAiScore(diffPct: number, hasPosition: boolean): number {
+	const multiplier = hasPosition
+		? TRADING_CONFIG.AI_SCORE_MULTIPLIER_EXISTING
+		: TRADING_CONFIG.AI_SCORE_MULTIPLIER;
+	return diffPct * multiplier;
+}
+
+/**
  * Analyze forecast and decide trading action
  */
 export async function analyzeForecast(
@@ -397,7 +422,6 @@ export async function analyzeForecast(
 	bbandsUpper: number,
 	bbandsLower: number,
 	rsi: number,
-	obvDelta: number,
 	prices: number[],
 	obvs: number[]
 ): Promise<void> {
@@ -446,16 +470,10 @@ export async function analyzeForecast(
 	// Take only first 12 forecast datapoints (1 hour)
 	const shortTermForecast = forecast.value.slice(0, 12);
 
-	// Use more conservative parameters for existing positions
+	// Use more conservative decay for existing positions
 	const decayAlpha = currentPosition
 		? TRADING_CONFIG.DECAY_ALPHA_EXISTING
 		: TRADING_CONFIG.DECAY_ALPHA;
-	const upperThreshold = currentPosition
-		? TRADING_CONFIG.UPPER_THRESHOLD_EXISTING
-		: TRADING_CONFIG.UPPER_THRESHOLD;
-	const lowerThreshold = currentPosition
-		? TRADING_CONFIG.LOWER_THRESHOLD_EXISTING
-		: TRADING_CONFIG.LOWER_THRESHOLD;
 
 	// Calculate time-decayed average of predicted prices
 	const decayedAvgPrice = getTimeDecayedAverage(shortTermForecast, decayAlpha);
@@ -463,28 +481,19 @@ export async function analyzeForecast(
 	// Calculate percentage difference using actual price
 	const diffPct = (decayedAvgPrice - currentPrice) / currentPrice;
 
+	// Calculate AI score
+	const aiScore = calculateAiScore(diffPct, !!currentPosition);
+
 	console.log(
 		`[${symbol}] [trade] AI:`,
 		`Current=${currentPrice}`,
 		`Actual=${actualPrice}`,
 		`DecayedAvg=${decayedAvgPrice}`,
-		`Diff=${(diffPct * 100).toFixed(4)}%`,
-		`Using ${shortTermForecast.length} forecast points`,
-		`Decay=${decayAlpha}`
+		`Diff=${(diffPct * 100).toFixed(4)}%`
 	);
 
-	// Generate signal based on thresholds
-	let signal: 'buy' | 'sell' | 'hold';
-	if (diffPct > upperThreshold) {
-		signal = 'buy';
-	} else if (diffPct < lowerThreshold) {
-		signal = 'sell';
-	} else {
-		signal = 'hold';
-	}
-
-	// Calculate TA signal
-	const taSignal = calculateTaSignal({
+	// Calculate TA score
+	const taScore = calculateTaSignal({
 		symbol,
 		currentPrice,
 		vwap,
@@ -496,15 +505,18 @@ export async function analyzeForecast(
 		entryPrice: currentPosition?.entryPrice ?? null
 	});
 
-	console.log(`[${symbol}] [trade] Signals:`, `AI=${signal}`, `TA=${taSignal}`);
+	// Combine scores
+	const totalScore = aiScore + taScore;
 
-	// Only proceed if both signals match and are not hold
-	if (signal === 'hold' || taSignal === 'hold' || signal !== taSignal) {
-		signal = 'hold';
-	}
+	console.log(
+		`[${symbol}] [trade] Scores:`,
+		`AI=${aiScore.toFixed(4)} (${(diffPct * 100).toFixed(4)}%)`,
+		`TA=${taScore.toFixed(4)}`,
+		`Total=${totalScore.toFixed(4)}`
+	);
 
-	// Position management logic
-	if (signal === 'buy') {
+	// Use score thresholds from config
+	if (totalScore > TRADING_CONFIG.TOTAL_SCORE_BUY_THRESHOLD) {
 		if (!currentPosition) {
 			// Get current USDC balance
 			const balance = await getBalance(env);
@@ -549,7 +561,7 @@ export async function analyzeForecast(
 		} else {
 			console.log(`[${symbol}] [trade] Holding position`);
 		}
-	} else if (signal === 'sell') {
+	} else if (totalScore < TRADING_CONFIG.TOTAL_SCORE_SELL_THRESHOLD) {
 		if (currentPosition) {
 			// Calculate expected USDC amount from the swap
 			const expectedUsdcAmount = await calculateSwapOutcome(
@@ -572,7 +584,6 @@ export async function analyzeForecast(
 			console.log(`[${symbol}] [trade] No position to close`);
 		}
 	} else {
-		// Hold signal - no need to update PnL since it will be calculated from actual prices
 		if (currentPosition) {
 			console.log(`[${symbol}] [trade] Holding position`);
 		} else {

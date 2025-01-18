@@ -162,6 +162,18 @@ function calculateBBandsScore(currentPrice: number, upperBand: number, lowerBand
 }
 
 /**
+ * Calculate profit-taking score
+ * Returns a negative score proportional to profit percentage
+ * to encourage selling when in profit
+ */
+function calculateProfitScore(currentPrice: number, entryPrice: number | null): number {
+	if (!entryPrice) return 0;
+
+	const priceDiff = (currentPrice - entryPrice) / entryPrice;
+	return priceDiff > 0 ? -priceDiff : 0; // -1 for each 1% in profit
+}
+
+/**
  * Calculate signal based on technical indicators
  */
 function calculateTaSignal({
@@ -172,7 +184,8 @@ function calculateTaSignal({
 	bbandsLower,
 	rsi,
 	prices,
-	obvs
+	obvs,
+	entryPrice
 }: {
 	symbol: string;
 	currentPrice: number;
@@ -182,6 +195,7 @@ function calculateTaSignal({
 	rsi: number;
 	prices: number[];
 	obvs: number[];
+	entryPrice: number | null;
 }): 'buy' | 'sell' | 'hold' {
 	let score = 0;
 
@@ -217,13 +231,18 @@ function calculateTaSignal({
 	);
 	score += divergenceScore;
 
+	// Add profit-taking bias
+	const profitScore = calculateProfitScore(currentPrice, entryPrice);
+	score += profitScore;
+
 	console.log(
 		`[${symbol}] [trade] TA:`,
 		`Score=${score.toFixed(4)}`,
 		`VWAP=${vwap.toFixed(4)}`,
 		`BBands=${bbandsLower.toFixed(4)}/${bbandsUpper.toFixed(4)} (${bbandsScore.toFixed(4)})`,
 		`RSI=${rsi.toFixed(4)} (${rsiScore.toFixed(4)})`,
-		`OBV Divergence=${divergenceScore.toFixed(4)}`
+		`OBV Divergence=${divergenceScore.toFixed(4)}`,
+		`Profit Score=${profitScore.toFixed(4)}`
 	);
 
 	if (score > 3) return 'buy';
@@ -473,7 +492,8 @@ export async function analyzeForecast(
 		bbandsLower,
 		rsi,
 		prices,
-		obvs
+		obvs,
+		entryPrice: currentPosition?.entryPrice ?? null
 	});
 
 	console.log(`[${symbol}] [trade] Signals:`, `AI=${signal}`, `TA=${taSignal}`);

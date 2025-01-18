@@ -32,8 +32,67 @@ const TRADING_CONFIG = {
 	LOWER_THRESHOLD_EXISTING: -0.0005, // -0.05% threshold when position exists
 	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss threshold
 	TAKE_PROFIT_THRESHOLD: 0.03, // +3% take profit threshold
-	INITIAL_BALANCE: 1000 // Initial USDC balance
+	INITIAL_BALANCE: 1000, // Initial USDC balance
+	OBV_WINDOW_SIZE: 12, // 1 hour window for slope calculation
+	SLOPE_THRESHOLD: 0.1 // Minimum slope difference to consider divergence
 } as const;
+
+/**
+ * Calculate slope using linear regression
+ */
+function calculateSlope(values: number[], windowSize: number): number {
+	if (values.length < windowSize) {
+		return 0;
+	}
+
+	// Get the last window of values
+	const subset = values.slice(-windowSize);
+
+	// Calculate means
+	let sumX = 0;
+	let sumY = 0;
+	for (let i = 0; i < windowSize; i++) {
+		sumX += i;
+		sumY += subset[i];
+	}
+	const xMean = sumX / windowSize;
+	const yMean = sumY / windowSize;
+
+	// Calculate slope
+	let numerator = 0;
+	let denominator = 0;
+	for (let i = 0; i < windowSize; i++) {
+		const dx = i - xMean;
+		const dy = subset[i] - yMean;
+		numerator += dx * dy;
+		denominator += dx * dx;
+	}
+
+	return denominator !== 0 ? numerator / denominator : 0;
+}
+
+/**
+ * Calculate divergence score between price and OBV slopes
+ * Returns a score between -1 and 1:
+ * - Negative: Bearish divergence (price up, OBV down)
+ * - Positive: Bullish divergence (price down, OBV up)
+ * - Magnitude indicates strength of divergence
+ */
+function detectSlopeDivergence(priceSlope: number, obvSlope: number, threshold: number): number {
+	// If slopes are too small, no significant divergence
+	if (Math.abs(priceSlope) < threshold) {
+		return 0;
+	}
+
+	// Calculate how strongly the slopes diverge
+	const divergenceStrength =
+		(priceSlope * -obvSlope) / Math.max(Math.abs(priceSlope), Math.abs(obvSlope));
+
+	// Scale the strength by how much price slope exceeds threshold
+	const scaleFactor = Math.min(Math.abs(priceSlope) / threshold, 1);
+
+	return divergenceStrength * scaleFactor;
+}
 
 /**
  * Calculate the expected swap outcome
@@ -67,6 +126,93 @@ async function calculateSwapOutcome(
 	});
 
 	return expectedReturn.toNumber();
+}
+
+/**
+ * Calculate RSI score between -1 and 1
+ * - Negative: Oversold (bullish)
+ * - Positive: Overbought (bearish)
+ * Magnitude increases exponentially as RSI moves towards extremes
+ */
+function calculateRsiScore(rsi: number): number {
+	// Center RSI around 50
+	const centered = rsi - 50;
+
+	// Normalize to -1 to 1 range and apply exponential scaling
+	// This makes the score change more rapidly at extremes
+	return Math.sign(centered) * Math.pow(Math.abs(centered) / 50, 2);
+}
+
+/**
+ * Calculate signal based on technical indicators
+ */
+function calculateTaSignal({
+	symbol,
+	currentPrice,
+	vwap,
+	bbandsUpper,
+	bbandsLower,
+	rsi,
+	prices,
+	obvs
+}: {
+	symbol: string;
+	currentPrice: number;
+	vwap: number;
+	bbandsUpper: number;
+	bbandsLower: number;
+	rsi: number;
+	prices: number[];
+	obvs: number[];
+}): 'buy' | 'sell' | 'hold' {
+	let score = 0;
+
+	// VWAP signals
+	if (vwap > 1.005 * currentPrice) score += 1;
+	if (vwap * 1.01 > currentPrice) score += 1;
+	if (vwap < 0.995 * currentPrice) score -= 1;
+	if (vwap * 0.99 < currentPrice) score -= 1;
+
+	// Bollinger Bands signals
+	if (currentPrice < bbandsLower) score += 1;
+	if (currentPrice < bbandsLower * 0.995) score += 1;
+	if (currentPrice > bbandsUpper) score -= 1;
+	if (currentPrice > bbandsUpper * 1.005) score -= 1;
+
+	// Dynamic RSI score (-2 to +2 range)
+	const rsiScore = calculateRsiScore(rsi) * 2;
+	score -= rsiScore; // Subtract because negative score means buy
+
+	// Calculate slopes for both price and OBV
+	const priceSlope = calculateSlope(prices, TRADING_CONFIG.OBV_WINDOW_SIZE);
+	const obvSlope = calculateSlope(obvs, TRADING_CONFIG.OBV_WINDOW_SIZE);
+
+	// Normalize slopes by their respective ranges
+	const maxPrice = Math.max(...prices.slice(-TRADING_CONFIG.OBV_WINDOW_SIZE));
+	const maxObv = Math.max(...obvs.slice(-TRADING_CONFIG.OBV_WINDOW_SIZE));
+	const normalizedPriceSlope = (priceSlope / maxPrice) * 1000;
+	const normalizedObvSlope = (obvSlope / maxObv) * 1000;
+
+	// Calculate divergence score
+	const divergenceScore = detectSlopeDivergence(
+		normalizedPriceSlope,
+		normalizedObvSlope,
+		TRADING_CONFIG.SLOPE_THRESHOLD
+	);
+	score += divergenceScore;
+
+	console.log(
+		`[${symbol}] [trade] TA:`,
+		`Score=${score.toFixed(4)}`,
+		`VWAP=${vwap.toFixed(4)}`,
+		`BBands=${bbandsLower.toFixed(4)}/${bbandsUpper.toFixed(4)}`,
+		`RSI=${rsi.toFixed(4)} (${rsiScore.toFixed(4)})`,
+		`OBV Divergence=${divergenceScore.toFixed(4)}`
+	);
+
+	if (score > 3) return 'buy';
+	if (score < -2) return 'sell';
+	return 'hold';
 }
 
 export type Position = {
@@ -205,67 +351,6 @@ function calculateActualPrice(symbol: string, baseAmount: number, quoteAmount: n
 }
 
 /**
- * Calculate signal based on technical indicators
- */
-function calculateTaSignal({
-	symbol,
-	currentPrice,
-	vwap,
-	bbandsUpper,
-	bbandsLower,
-	rsi,
-	obvDelta
-}: {
-	symbol: string;
-	currentPrice: number;
-	vwap: number;
-	bbandsUpper: number;
-	bbandsLower: number;
-	rsi: number;
-	obvDelta: number;
-}): 'buy' | 'sell' | 'hold' {
-	let score = 0;
-
-	// VWAP signals
-	if (vwap > 1.005 * currentPrice) score += 1;
-	if (vwap * 1.01 > currentPrice) score += 1;
-	if (vwap < 0.995 * currentPrice) score -= 1;
-	if (vwap * 0.99 < currentPrice) score -= 1;
-
-	// Bollinger Bands signals
-	if (currentPrice < bbandsLower) score += 1;
-	if (currentPrice < bbandsLower * 0.995) score += 1;
-	if (currentPrice > bbandsUpper) score -= 1;
-	if (currentPrice > bbandsUpper * 1.005) score -= 1;
-
-	// RSI signals
-	if (rsi < 40) score += 1;
-	if (rsi < 25) score += 1;
-	if (rsi > 60) score -= 1;
-	if (rsi > 75) score -= 1;
-
-	// OBV signals
-	const obvDeltaSqrt = obvDelta > 0 ? Math.sqrt(obvDelta) : -Math.sqrt(-obvDelta);
-	if (obvDeltaSqrt > 150) score += 1;
-	if (obvDeltaSqrt > 300) score += 1;
-	if (obvDeltaSqrt < -150) score -= 1;
-	if (obvDeltaSqrt < -300) score -= 1;
-
-	console.log(
-		`[${symbol}] [trade] Technical Analysis Score:`,
-		`Score=${score}`,
-		`VWAP=${vwap}`,
-		`BBands=${bbandsLower}/${bbandsUpper}`,
-		`RSI=${rsi}`,
-		`OBV Delta=${obvDeltaSqrt}`
-	);
-
-	if (score > 2) return 'buy';
-	if (score < -1) return 'sell';
-	return 'hold';
-}
-
-/**
  * Analyze forecast and decide trading action
  */
 export async function analyzeForecast(
@@ -277,7 +362,9 @@ export async function analyzeForecast(
 	bbandsUpper: number,
 	bbandsLower: number,
 	rsi: number,
-	obvDelta: number
+	obvDelta: number,
+	prices: number[],
+	obvs: number[]
 ): Promise<void> {
 	// Get current position if any
 	const currentPosition = await getPosition(env, symbol);
@@ -342,14 +429,13 @@ export async function analyzeForecast(
 	const diffPct = (decayedAvgPrice - currentPrice) / currentPrice;
 
 	console.log(
-		`[${symbol}] [trade] Analysis:`,
+		`[${symbol}] [trade] AI:`,
 		`Current=${currentPrice}`,
 		`Actual=${actualPrice}`,
 		`DecayedAvg=${decayedAvgPrice}`,
 		`Diff=${(diffPct * 100).toFixed(4)}%`,
 		`Using ${shortTermForecast.length} forecast points`,
-		`Decay=${decayAlpha}`,
-		`Thresholds=${(upperThreshold * 100).toFixed(3)}%/${(lowerThreshold * 100).toFixed(3)}%`
+		`Decay=${decayAlpha}`
 	);
 
 	// Generate signal based on thresholds
@@ -370,7 +456,8 @@ export async function analyzeForecast(
 		bbandsUpper,
 		bbandsLower,
 		rsi,
-		obvDelta
+		prices,
+		obvs
 	});
 
 	console.log(`[${symbol}] [trade] Signals:`, `AI=${signal}`, `TA=${taSignal}`);

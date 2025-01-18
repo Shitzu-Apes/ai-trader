@@ -241,6 +241,8 @@ export async function fetchHistoricalData(db: D1Database, symbol: string) {
 	const timestamps = completeTimestamps.map((ts) => dayjs(ts).format('YYYY-MM-DD HH:mm:ss'));
 	const y: Record<string, number> = {};
 	const x: Record<string, number[]> = {};
+	const prices: number[] = [];
+	const obvs: number[] = [];
 
 	// Collect data only from complete timestamps
 	let lastObv = 0;
@@ -254,6 +256,10 @@ export async function fetchHistoricalData(db: D1Database, symbol: string) {
 
 		// Target variable (y)
 		y[ts] = data.candle.close;
+
+		// Store price and OBV data for divergence analysis
+		prices.push(data.candle.close);
+		obvs.push(data.obv.value);
 
 		// Exogenous variables (x)
 		vwap = data.vwap.value;
@@ -279,7 +285,7 @@ export async function fetchHistoricalData(db: D1Database, symbol: string) {
 		lastObv = data.obv.value;
 	});
 
-	return { timestamps, y, x, vwap, bbandsUpper, bbandsLower, rsi, obvDelta };
+	return { timestamps, y, x, vwap, bbandsUpper, bbandsLower, rsi, obvDelta, prices, obvs };
 }
 
 export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
@@ -383,11 +389,8 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 	// Make forecast after all indicators are fetched and stored
 	try {
 		await new Promise((resolve) => setTimeout(resolve, 10_000));
-		console.log(`[${symbol}]`, '[forecast] Making forecast...');
-		const { forecast, vwap, bbandsUpper, bbandsLower, rsi, obvDelta } = await makeForecast(
-			env,
-			symbol
-		);
+		const { forecast, vwap, bbandsUpper, bbandsLower, rsi, obvDelta, prices, obvs } =
+			await makeForecast(env, symbol);
 
 		// Get current price from candle data
 		const candleData = bulkData.find((d) => d.id === 'candle');
@@ -409,7 +412,9 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 			bbandsUpper,
 			bbandsLower,
 			rsi,
-			obvDelta
+			obvDelta,
+			prices,
+			obvs
 		);
 	} catch (error) {
 		console.error('Error making forecast:', error);

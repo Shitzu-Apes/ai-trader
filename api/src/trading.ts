@@ -184,6 +184,29 @@ function calculateProfitScore(currentPrice: number, entryPrice: number | null): 
 }
 
 /**
+ * Calculate VWAP score dynamically based on price difference
+ * Returns a score where:
+ * - Positive: VWAP above price (bullish)
+ * - Negative: VWAP below price (bearish)
+ * - Zero: Within 0.5% threshold
+ * Score increases by 0.5 for each additional percentage point
+ */
+function calculateVwapScore(currentPrice: number, vwap: number): number {
+	const vwapDiff = (vwap - currentPrice) / currentPrice;
+	const threshold = 0.005; // 0.5%
+
+	if (Math.abs(vwapDiff) <= threshold) {
+		return 0;
+	}
+
+	// Calculate how many additional percentage points above threshold
+	const additionalPercentage = Math.abs(vwapDiff) - threshold;
+	const score = 0.5 * Math.floor(additionalPercentage / 0.01); // 0.5 per 1%
+
+	return vwapDiff > 0 ? score : -score;
+}
+
+/**
  * Calculate signal based on technical indicators
  * Returns a score where:
  * Positive: Bullish
@@ -213,11 +236,9 @@ function calculateTaSignal({
 }): number {
 	let score = 0;
 
-	// VWAP signals
-	if (vwap > 1.005 * currentPrice) score += TRADING_CONFIG.VWAP_SCORE;
-	if (vwap * 1.01 > currentPrice) score += TRADING_CONFIG.VWAP_EXTRA_SCORE;
-	if (vwap < 0.995 * currentPrice) score -= TRADING_CONFIG.VWAP_SCORE;
-	if (vwap * 0.99 < currentPrice) score -= TRADING_CONFIG.VWAP_EXTRA_SCORE;
+	// Dynamic VWAP score
+	const vwapScore = calculateVwapScore(currentPrice, vwap) * TRADING_CONFIG.VWAP_SCORE;
+	score += vwapScore;
 
 	// Dynamic Bollinger Bands score
 	const bbandsScore = calculateBBandsScore(currentPrice, bbandsUpper, bbandsLower);
@@ -253,7 +274,7 @@ function calculateTaSignal({
 	console.log(
 		`[${symbol}] [trade] TA:`,
 		`Score=${score.toFixed(4)}`,
-		`VWAP=${vwap.toFixed(4)}`,
+		`VWAP=${vwap.toFixed(4)} (${vwapScore.toFixed(4)})`,
 		`BBands=${bbandsLower.toFixed(4)}/${bbandsUpper.toFixed(4)} (${bbandsScore.toFixed(4)})`,
 		`RSI=${rsi.toFixed(4)} (${rsiScore.toFixed(4)})`,
 		`OBV Divergence=${divergenceScore.toFixed(4)}`,

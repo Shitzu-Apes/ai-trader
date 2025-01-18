@@ -144,6 +144,24 @@ function calculateRsiScore(rsi: number): number {
 }
 
 /**
+ * Calculate Bollinger Bands score between -1.5 and 1.5
+ * - Negative: Price near upper band (bearish)
+ * - Positive: Price near lower band (bullish)
+ * - Zero: Price in the middle
+ */
+function calculateBBandsScore(currentPrice: number, upperBand: number, lowerBand: number): number {
+	// Calculate the middle band
+	const middleBand = (upperBand + lowerBand) / 2;
+
+	// Calculate where price is in the band range
+	const totalRange = upperBand - lowerBand;
+	const pricePosition = (currentPrice - middleBand) / (totalRange / 2);
+
+	// Return score between -1.5 and 1.5
+	return -pricePosition * 1.5;
+}
+
+/**
  * Calculate signal based on technical indicators
  */
 function calculateTaSignal({
@@ -173,11 +191,9 @@ function calculateTaSignal({
 	if (vwap < 0.995 * currentPrice) score -= 1;
 	if (vwap * 0.99 < currentPrice) score -= 1;
 
-	// Bollinger Bands signals
-	if (currentPrice < bbandsLower) score += 1;
-	if (currentPrice < bbandsLower * 0.995) score += 1;
-	if (currentPrice > bbandsUpper) score -= 1;
-	if (currentPrice > bbandsUpper * 1.005) score -= 1;
+	// Dynamic Bollinger Bands score (-1.5 to +1.5 range)
+	const bbandsScore = calculateBBandsScore(currentPrice, bbandsUpper, bbandsLower);
+	score += bbandsScore;
 
 	// Dynamic RSI score (-2 to +2 range)
 	const rsiScore = calculateRsiScore(rsi) * 2;
@@ -205,7 +221,7 @@ function calculateTaSignal({
 		`[${symbol}] [trade] TA:`,
 		`Score=${score.toFixed(4)}`,
 		`VWAP=${vwap.toFixed(4)}`,
-		`BBands=${bbandsLower.toFixed(4)}/${bbandsUpper.toFixed(4)}`,
+		`BBands=${bbandsLower.toFixed(4)}/${bbandsUpper.toFixed(4)} (${bbandsScore.toFixed(4)})`,
 		`RSI=${rsi.toFixed(4)} (${rsiScore.toFixed(4)})`,
 		`OBV Divergence=${divergenceScore.toFixed(4)}`
 	);

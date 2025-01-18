@@ -45,7 +45,7 @@ const TRADING_CONFIG = {
 	VWAP_EXTRA_SCORE: 1, // Additional score for stronger VWAP signals
 	BBANDS_MULTIPLIER: 1.5, // Bollinger Bands score multiplier
 	RSI_MULTIPLIER: 2, // RSI score multiplier
-	OBV_DIVERGENCE_MULTIPLIER: 1, // OBV divergence score multiplier
+	OBV_DIVERGENCE_MULTIPLIER: 2.5, // OBV divergence score multiplier
 	PROFIT_SCORE_MULTIPLIER: 1, // Profit-taking score multiplier (per 1% in profit)
 
 	// Score thresholds for trading decisions

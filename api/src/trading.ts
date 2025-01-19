@@ -33,24 +33,24 @@ const TRADING_CONFIG = {
 	STOP_LOSS_THRESHOLD: -0.02, // -2% stop loss threshold
 	TAKE_PROFIT_THRESHOLD: 0.03, // +3% take profit threshold
 	INITIAL_BALANCE: 1000, // Initial USDC balance
-	OBV_WINDOW_SIZE: 12, // 1 hour window for slope calculation
+	OBV_WINDOW_SIZE: 8, // 2/3 hour window for slope calculation
 	SLOPE_THRESHOLD: 0.1, // Minimum slope difference to consider divergence
 
 	// AI score multipliers
-	AI_SCORE_MULTIPLIER: 1800, // Multiplier for new positions (1% difference = score of 1)
-	AI_SCORE_MULTIPLIER_EXISTING: 1500, // More conservative multiplier for existing positions
+	AI_SCORE_MULTIPLIER: 1500, // Multiplier for new positions
+	AI_SCORE_MULTIPLIER_EXISTING: 1200, // More conservative multiplier for existing positions
 
 	// TA score multipliers
 	VWAP_SCORE: 1, // Base score for VWAP signals
 	VWAP_EXTRA_SCORE: 1, // Additional score for stronger VWAP signals
 	BBANDS_MULTIPLIER: 1.5, // Bollinger Bands score multiplier
 	RSI_MULTIPLIER: 2, // RSI score multiplier
-	OBV_DIVERGENCE_MULTIPLIER: 2.5, // OBV divergence score multiplier
+	OBV_DIVERGENCE_MULTIPLIER: 1.2, // OBV divergence score multiplier
 	PROFIT_SCORE_MULTIPLIER: 1, // Profit-taking score multiplier (per 1% in profit)
 
 	// Score thresholds for trading decisions
 	TOTAL_SCORE_BUY_THRESHOLD: 5, // Score above which to buy
-	TOTAL_SCORE_SELL_THRESHOLD: -3.5 // Score below which to sell
+	TOTAL_SCORE_SELL_THRESHOLD: -3 // Score below which to sell
 } as const;
 
 /**
@@ -156,7 +156,7 @@ function calculateRsiScore(rsi: number): number {
 
 	// Normalize to -1 to 1 range and apply exponential scaling
 	// This makes the score change more rapidly at extremes
-	return Math.sign(centered) * Math.pow(Math.abs(centered) / 50, 2);
+	return -Math.sign(centered) * Math.pow(Math.abs(centered) / 50, 2);
 }
 
 /**
@@ -188,12 +188,12 @@ function calculateProfitScore(currentPrice: number, entryPrice: number | null): 
  * Returns a score where:
  * - Positive: VWAP above price (bullish)
  * - Negative: VWAP below price (bearish)
- * - Zero: Within 0.5% threshold
+ * - Zero: Within 1% threshold
  * Score increases by 0.5 for each additional percentage point
  */
 function calculateVwapScore(currentPrice: number, vwap: number): number {
 	const vwapDiff = (vwap - currentPrice) / currentPrice;
-	const threshold = 0.005; // 0.5%
+	const threshold = 0.01; // 1%
 
 	if (Math.abs(vwapDiff) <= threshold) {
 		return 0;
@@ -236,8 +236,10 @@ function calculateTaSignal({
 }): number {
 	let score = 0;
 
-	// Dynamic VWAP score
-	const vwapScore = calculateVwapScore(currentPrice, vwap) * TRADING_CONFIG.VWAP_SCORE;
+	// Dynamic VWAP score (only when no position is open)
+	const vwapScore = !entryPrice
+		? calculateVwapScore(currentPrice, vwap) * TRADING_CONFIG.VWAP_SCORE
+		: 0;
 	score += vwapScore;
 
 	// Dynamic Bollinger Bands score
@@ -274,7 +276,7 @@ function calculateTaSignal({
 	console.log(
 		`[${symbol}] [trade] TA:`,
 		`Score=${score.toFixed(4)}`,
-		`VWAP=${vwap.toFixed(4)} (${vwapScore.toFixed(4)})`,
+		`VWAP=${vwap.toFixed(4)} (${vwapScore.toFixed(4)})${entryPrice ? ' [ignored]' : ''}`,
 		`BBands=${bbandsLower.toFixed(4)}/${bbandsUpper.toFixed(4)} (${bbandsScore.toFixed(4)})`,
 		`RSI=${rsi.toFixed(4)} (${rsiScore.toFixed(4)})`,
 		`OBV Divergence=${divergenceScore.toFixed(4)}`,

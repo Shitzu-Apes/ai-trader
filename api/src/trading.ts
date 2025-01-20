@@ -37,8 +37,8 @@ const TRADING_CONFIG = {
 	SLOPE_THRESHOLD: 0.1, // Minimum slope difference to consider divergence
 
 	// AI score multipliers
-	AI_SCORE_MULTIPLIER: 900, // Multiplier for new positions
-	AI_SCORE_MULTIPLIER_EXISTING: 600, // More conservative multiplier for existing positions
+	AI_SCORE_MULTIPLIER: 0, // Multiplier for new positions
+	AI_SCORE_MULTIPLIER_EXISTING: 0, // More conservative multiplier for existing positions
 
 	// TA score multipliers
 	VWAP_SCORE: 0.4, // Base score for VWAP signals
@@ -55,10 +55,10 @@ const TRADING_CONFIG = {
 
 	// Partial position thresholds
 	PARTIAL_POSITION_THRESHOLDS: [
-		{ buy: 3, sell: -1 }, // 1st position (25%)
-		{ buy: 7, sell: 1 }, // 2nd position (25%)
-		{ buy: 11, sell: 3 }, // 3rd position (25%)
-		{ buy: 15, sell: 5 } // 4th position (25%)
+		{ buy: 2.5, sell: -1 }, // 1st position (25%)
+		{ buy: 5.5, sell: 1 }, // 2nd position (25%)
+		{ buy: 8.5, sell: 3 }, // 3rd position (25%)
+		{ buy: 11.5, sell: 5 } // 4th position (25%)
 	] as const
 } as const;
 

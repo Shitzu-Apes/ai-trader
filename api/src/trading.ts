@@ -116,7 +116,7 @@ function detectSlopeDivergence(priceSlope: number, obvSlope: number, threshold: 
 	// Scale the strength by how much price slope exceeds threshold
 	const scaleFactor = Math.min(Math.abs(priceSlope) / threshold, 1);
 
-	return -divergenceStrength * scaleFactor;
+	return divergenceStrength * scaleFactor;
 }
 
 /**

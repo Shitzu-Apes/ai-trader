@@ -483,14 +483,29 @@ function calculateActualPrice(symbol: string, baseAmount: number, quoteAmount: n
 
 /**
  * Calculate AI score based on forecasted price difference
- * Multiply by 100 to make it comparable to other scores
- * e.g., 1% difference = score of 1
+ * - For small differences (<=0.2%), use linear scaling
+ * - For larger differences, apply logarithmic dampening
+ * Multiply by configured multiplier to make it comparable to other scores
  */
 function calculateAiScore(diffPct: number, position: Position | null): number {
+	const threshold = 0.002; // ±0.2%
 	const multiplier = position
 		? TRADING_CONFIG.AI_SCORE_MULTIPLIER_EXISTING
 		: TRADING_CONFIG.AI_SCORE_MULTIPLIER;
-	return diffPct * multiplier;
+
+	// For small differences, use normal linear scaling
+	if (Math.abs(diffPct) <= threshold) {
+		return diffPct * multiplier;
+	}
+
+	// For larger differences, apply logarithmic dampening
+	// Keep the sign but dampen the magnitude
+	const sign = Math.sign(diffPct);
+	const baseDiff = sign * threshold;
+	const excessDiff = Math.abs(diffPct) - threshold;
+	const dampened = baseDiff + sign * Math.log10(1 + excessDiff * 10) * threshold;
+
+	return dampened * multiplier;
 }
 
 // Helper function to get thresholds based on partial positions

@@ -298,16 +298,17 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 
 	console.log('[date]', formattedTimestamp);
 
-	// Fetch depth
+	// Fetch depth and liquidation zones first
+	let depth;
 	try {
-		const depth = await fetchDepth(symbol, env);
+		depth = await fetchDepth(symbol, env);
 		console.log(`[${symbol}]`, '[depth]', depth);
 		await storeDatapoint(env.DB, symbol, 'depth', timestamp, depth);
 	} catch (error) {
 		console.error('Error fetching depth:', error);
+		throw error;
 	}
 
-	// Fetch liquidation zones
 	try {
 		const liqZones = await fetchLiquidationZones(symbol, env);
 		console.log(`[${symbol}]`, '[liq_zones]', liqZones);
@@ -415,7 +416,9 @@ export async function fetchTaapiIndicators(symbol: string, env: EnvBindings) {
 			bbandsLower,
 			rsi,
 			prices,
-			obvs
+			obvs,
+			depth.bid_size,
+			depth.ask_size
 		);
 	} catch (error) {
 		console.error('Error making forecast:', error);

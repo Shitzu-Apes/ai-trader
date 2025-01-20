@@ -47,6 +47,7 @@ const TRADING_CONFIG = {
 	RSI_MULTIPLIER: 2, // RSI score multiplier
 	OBV_DIVERGENCE_MULTIPLIER: 0.8, // OBV divergence score multiplier
 	PROFIT_SCORE_MULTIPLIER: 1.5, // Profit-taking score multiplier (per 1% in profit)
+	DEPTH_SCORE_MULTIPLIER: 1.2, // Orderbook depth imbalance score multiplier
 
 	// Score thresholds for trading decisions
 	TOTAL_SCORE_BUY_THRESHOLD: 5, // Score above which to buy
@@ -217,7 +218,9 @@ function calculateTaSignal({
 	rsi,
 	prices,
 	obvs,
-	position
+	position,
+	bidSize,
+	askSize
 }: {
 	symbol: string;
 	currentPrice: number;
@@ -228,6 +231,8 @@ function calculateTaSignal({
 	prices: number[];
 	obvs: number[];
 	position: Position | null;
+	bidSize: number;
+	askSize: number;
 }): number[] {
 	// If no position, calculate a single score
 	if (!position) {
@@ -264,13 +269,25 @@ function calculateTaSignal({
 			) * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER;
 		score += divergenceScore;
 
+		// Orderbook depth imbalance score
+		let depthScore = 0;
+		if (bidSize > askSize) {
+			// Bullish imbalance
+			depthScore = (bidSize - askSize) / askSize;
+		} else if (askSize > bidSize) {
+			// Bearish imbalance
+			depthScore = -(askSize - bidSize) / bidSize;
+		}
+		score += depthScore * TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER;
+
 		console.log(
 			`[${symbol}] [trade] TA (new position):`,
 			`Score=${score.toFixed(4)}`,
 			`VWAP=${vwap.toFixed(4)} (${vwapScore.toFixed(4)})`,
 			`BBands=${bbandsLower.toFixed(4)}/${bbandsUpper.toFixed(4)} (${bbandsScore.toFixed(4)})`,
 			`RSI=${rsi.toFixed(4)} (${rsiScore.toFixed(4)})`,
-			`OBV Divergence=${divergenceScore.toFixed(4)}`
+			`OBV Divergence=${divergenceScore.toFixed(4)}`,
+			`Depth Score=${depthScore.toFixed(4)} (Bid=${bidSize.toFixed(2)}, Ask=${askSize.toFixed(2)})`
 		);
 
 		return [score];
@@ -307,6 +324,17 @@ function calculateTaSignal({
 			) * TRADING_CONFIG.OBV_DIVERGENCE_MULTIPLIER;
 		score += divergenceScore;
 
+		// Orderbook depth imbalance score
+		let depthScore = 0;
+		if (bidSize > askSize) {
+			// Bullish imbalance
+			depthScore = (bidSize - askSize) / askSize;
+		} else if (askSize > bidSize) {
+			// Bearish imbalance
+			depthScore = -(askSize - bidSize) / bidSize;
+		}
+		score += depthScore * TRADING_CONFIG.DEPTH_SCORE_MULTIPLIER;
+
 		// Profit score for this specific partial
 		const priceDiff = (currentPrice - partial.entryPrice) / partial.entryPrice;
 		const profitScore =
@@ -319,6 +347,7 @@ function calculateTaSignal({
 			`BBands=${bbandsLower.toFixed(4)}/${bbandsUpper.toFixed(4)} (${bbandsScore.toFixed(4)})`,
 			`RSI=${rsi.toFixed(4)} (${rsiScore.toFixed(4)})`,
 			`OBV Divergence=${divergenceScore.toFixed(4)}`,
+			`Depth Score=${depthScore.toFixed(4)} (Bid=${bidSize.toFixed(2)}, Ask=${askSize.toFixed(2)})`,
 			`Profit Score=${profitScore.toFixed(4)}`
 		);
 
@@ -584,7 +613,9 @@ export async function analyzeForecast(
 	bbandsLower: number,
 	rsi: number,
 	prices: number[],
-	obvs: number[]
+	obvs: number[],
+	bidSize: number,
+	askSize: number
 ): Promise<void> {
 	// Get current position if any
 	const currentPosition = await getPosition(env, symbol);
@@ -648,7 +679,9 @@ export async function analyzeForecast(
 		rsi,
 		prices,
 		obvs,
-		position: currentPosition
+		position: currentPosition,
+		bidSize,
+		askSize
 	});
 
 	// Calculate total scores for each partial position
